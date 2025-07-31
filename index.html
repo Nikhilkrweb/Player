@@ -2,110 +2,144 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>YouTube Style Video Player Card</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Chat - Firebase + WebRTC</title>
   <style>
-    body {
-      background: #181818;
-      font-family: Arial, sans-serif;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-    }
-    .video-card {
-      background: #202020;
-      border-radius: 12px;
-      box-shadow: 0 4px 18px rgba(0,0,0,0.4);
-      width: 480px;
-      padding: 24px;
-      color: #fff;
-    }
-    .card-header {
-      font-size: 1.1em;
-      font-weight: bold;
-      margin-bottom: 18px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .video-container {
-      width: 100%;
-      aspect-ratio: 16 / 9;
-      background: #000;
-      border-radius: 8px;
-      overflow: hidden;
-      margin-bottom: 18px;
-      border: 2px solid #333;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    video {
-      width: 100%;
-      height: 100%;
-      background: #000;
-    }
-    .video-url-input {
-      width: 80%;
-      padding: 8px;
-      border-radius: 6px;
-      border: 1px solid #444;
-      background: #222;
-      color: #fff;
-      margin-right: 8px;
-    }
-    .load-btn {
-      padding: 8px 16px;
-      border-radius: 6px;
-      border: none;
-      background: #cc0000;
-      color: #fff;
-      font-weight: bold;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .load-btn:hover {
-      background: #ff0000;
-    }
-    @media (max-width: 600px) {
-      .video-card {
-        width: 100%;
-        padding: 8px;
-      }
-    }
+    video { width: 45%; margin: 10px; border: 2px solid #555; border-radius: 10px; }
+    body { font-family: Arial; text-align: center; padding: 20px; }
+    input, button { padding: 8px 16px; margin: 10px; }
   </style>
 </head>
 <body>
-  <div class="video-card">
-    <div class="card-header">
-      <img src="https://upload.wikimedia.org/wikipedia/commons/4/42/YouTube_icon_%282013-2017%29.png" width="28" height="28" alt="YouTube Icon">
-      Video Player
-    </div>
-    <div class="video-container">
-      <video id="videoPlayer" controls poster="https://i.imgur.com/4NJlUJJ.png">
-        <source id="videoSource" src="https://archive.org/download/introduction_to_programming_and_python/5_6091493137425896650.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-      </video>
-    </div>
-    <form id="videoForm" autocomplete="off" onsubmit="return false;">
-      <input type="url" id="videoURL" class="video-url-input" placeholder="Paste video link here..." required>
-      <button class="load-btn" onclick="loadVideo()">Play</button>
-    </form>
-  </div>
-  <script>
-    function loadVideo() {
-      const urlInput = document.getElementById('videoURL');
-      const videoPlayer = document.getElementById('videoPlayer');
-      const videoSource = document.getElementById('videoSource');
-      const url = urlInput.value.trim();
+  <h2>Firebase + WebRTC Video Chat</h2>
 
-      if (url) {
-        videoSource.src = url;
-        videoPlayer.load();
-        videoPlayer.play();
-      }
+  <video id="localVideo" autoplay muted playsinline></video>
+  <video id="remoteVideo" autoplay playsinline></video>
+
+  <div>
+    <button onclick="createRoom()">Create Room</button>
+    <input id="roomIdInput" placeholder="Enter Room ID">
+    <button onclick="joinRoom()">Join Room</button>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+    import { getFirestore, collection, doc, setDoc, updateDoc, getDoc, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
+      authDomain: "video-chat-44584.firebaseapp.com",
+      projectId: "video-chat-44584",
+      storageBucket: "video-chat-44584.firebasestorage.app",
+      messagingSenderId: "598757234224",
+      appId: "1:598757234224:web:1ae7b1d35abafeb7d7bff5",
+      measurementId: "G-C18BHR5LH1"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const roomIdInput = document.getElementById('roomIdInput');
+
+    const servers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    let pc = new RTCPeerConnection(servers);
+    let localStream, remoteStream;
+    let roomRef;
+
+    async function startCamera() {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      localVideo.srcObject = localStream;
+
+      remoteStream = new MediaStream();
+      remoteVideo.srcObject = remoteStream;
+
+      pc.ontrack = event => {
+        event.streams[0].getTracks().forEach(track => {
+          remoteStream.addTrack(track);
+        });
+      };
     }
+
+    pc.onicecandidate = async (event) => {
+      if (event.candidate && roomRef) {
+        const candidate = event.candidate.toJSON();
+        const candidateCol = pc.signalingState === "have-local-offer"
+          ? collection(roomRef, "callerCandidates")
+          : collection(roomRef, "calleeCandidates");
+        await addDoc(candidateCol, candidate);
+      }
+    };
+
+    window.createRoom = async function () {
+      await startCamera();
+      roomRef = await addDoc(collection(db, "rooms"), {});
+      roomIdInput.value = roomRef.id;
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await setDoc(roomRef, { offer });
+
+      onSnapshot(roomRef, async (docSnap) => {
+        const data = docSnap.data();
+        if (!pc.currentRemoteDescription && data?.answer) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        }
+      });
+
+      const calleeCandidates = collection(roomRef, "calleeCandidates");
+      onSnapshot(calleeCandidates, (snapshot) => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === "added") {
+            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+          }
+        });
+      });
+    };
+
+    window.joinRoom = async function () {
+      await startCamera();
+      const roomId = roomIdInput.value.trim();
+      roomRef = doc(db, "rooms", roomId);
+      const roomSnap = await getDoc(roomRef);
+      if (!roomSnap.exists()) {
+        alert("Room not found");
+        return;
+      }
+
+      const data = roomSnap.data();
+      await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await updateDoc(roomRef, { answer });
+
+      const callerCandidates = collection(roomRef, "callerCandidates");
+      const calleeCandidates = collection(roomRef, "calleeCandidates");
+
+      onSnapshot(callerCandidates, (snapshot) => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === "added") {
+            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+          }
+        });
+      });
+
+      onSnapshot(calleeCandidates, (snapshot) => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === "added") {
+            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+          }
+        });
+      });
+
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          await addDoc(calleeCandidates, event.candidate.toJSON());
+        }
+      };
+    };
   </script>
 </body>
 </html>
