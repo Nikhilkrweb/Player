@@ -147,10 +147,10 @@
     </button>
     <button id="switchCamera" title="Switch Camera">&#8645;</button>
     <select id="videoQuality" title="Video Quality">
-      <option value="default">Default</option>
-      <option value="hd">HD (1280x720)</option>
+      <option value="low" selected>Low (426x240)</option>
       <option value="sd">SD (854x480)</option>
-      <option value="low">Low (426x240)</option>
+      <option value="hd">HD (1280x720)</option>
+      <option value="default">Max Resolution</option>
     </select>
   </div>
   <script type="module">
@@ -192,7 +192,8 @@
     let localStream;
     let currentVideoDeviceId = null;
     let availableVideoDevices = [];
-    let currentQuality = 'default';
+    // Start with low (426x240) as default
+    let currentQuality = 'low';
 
     function getConstraints(quality, deviceId) {
       let constraints = {};
@@ -202,7 +203,7 @@
         constraints = { width: { ideal: 854 }, height: { ideal: 480 }, aspectRatio: 16/9 };
       } else if (quality === 'low') {
         constraints = { width: { ideal: 426 }, height: { ideal: 240 }, aspectRatio: 16/9 };
-      } else { // default
+      } else { // "default" (max resolution)
         constraints = { aspectRatio: 16/9 };
       }
       if (deviceId) {
@@ -222,7 +223,7 @@
       try {
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
       } catch (e) {
-        // fallback to default
+        // fallback to max resolution if requested fails
         try {
           constraints = getConstraints('default', deviceId);
           localStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -333,6 +334,9 @@
       currentQuality = e.target.value;
       await restartLocalStream(currentQuality, currentVideoDeviceId);
     };
+
+    // Set select to Low by default on reload (for safety)
+    videoQualitySelect.value = 'low';
 
     startMedia().then(connect);
   </script>
