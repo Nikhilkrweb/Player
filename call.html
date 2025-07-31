@@ -9,7 +9,7 @@
       height: 100%;
       width: 100%;
       overflow: hidden;
-      background: #000;
+      background-color: #000;
       font-family: Arial, sans-serif;
     }
 
@@ -29,9 +29,9 @@
       left: 0;
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      object-fit: contain; /* Important: keeps aspect ratio, adds black bars if needed */
       z-index: 1;
-      background: #000;
+      background: black;
     }
 
     #localVideo {
@@ -40,11 +40,11 @@
       right: 20px;
       width: 100px;
       height: 150px;
-      object-fit: cover;
+      object-fit: contain; /* Same here to prevent crop */
       border-radius: 10px;
-      z-index: 2;
-      background: #000;
       border: 2px solid white;
+      z-index: 2;
+      background: black;
     }
 
     #endCall {
@@ -58,42 +58,10 @@
       border-radius: 50%;
       width: 60px;
       height: 60px;
-      font-size: 18px;
+      font-size: 20px;
+      font-weight: bold;
       cursor: pointer;
       z-index: 3;
-    }
-
-    /* Mobile: landscape/portrait - full width layout */
-    @media (max-width: 600px) {
-      #videoContainer {
-        width: 100vw;
-        height: 100vh;
-      }
-
-      #remoteVideo {
-        width: 100vw;
-        height: 100vh;
-      }
-
-      #localVideo {
-        width: 80px;
-        height: 120px;
-      }
-    }
-
-    /* Desktop view - full height portrait style */
-    @media (min-width: 601px) {
-      #videoContainer {
-        width: auto;
-        height: 100vh;
-        max-width: 420px;
-        margin: auto;
-      }
-
-      #remoteVideo {
-        width: 100%;
-        height: 100%;
-      }
     }
   </style>
 </head>
@@ -106,7 +74,10 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, getDoc, deleteDoc, onSnapshot, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+    import {
+      getFirestore, doc, setDoc, getDoc,
+      deleteDoc, onSnapshot, collection, addDoc
+    } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
@@ -123,6 +94,7 @@
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
     const endCallBtn = document.getElementById('endCall');
+
     const roomId = localStorage.getItem('roomId');
     const isCaller = localStorage.getItem('isCaller') === 'true';
 
@@ -135,9 +107,10 @@
 
     async function startMedia() {
       localStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 360 }, height: { ideal: 640 } },
+        video: true,
         audio: true
       });
+
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
       localVideo.srcObject = localStream;
 
@@ -162,14 +135,14 @@
         await pc.setLocalDescription(offer);
         await setDoc(roomRef, { offer });
 
-        onSnapshot(roomRef, async (snap) => {
+        onSnapshot(roomRef, async snap => {
           const data = snap.data();
           if (data?.answer && !pc.currentRemoteDescription) {
             await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
           }
         });
 
-        onSnapshot(collection(db, 'rooms', roomId, 'calleeCandidates'), (snapshot) => {
+        onSnapshot(collection(db, 'rooms', roomId, 'calleeCandidates'), snapshot => {
           snapshot.docChanges().forEach(change => {
             if (change.type === 'added') {
               pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
@@ -178,23 +151,24 @@
         });
 
       } else {
-        if (roomSnap.exists()) {
-          const data = roomSnap.data();
-          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          await setDoc(roomRef, { ...data, answer });
-
-          onSnapshot(collection(db, 'rooms', roomId, 'callerCandidates'), (snapshot) => {
-            snapshot.docChanges().forEach(change => {
-              if (change.type === 'added') {
-                pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-              }
-            });
-          });
-        } else {
+        if (!roomSnap.exists()) {
           alert("Room does not exist!");
+          return;
         }
+
+        const data = roomSnap.data();
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await setDoc(roomRef, { ...data, answer });
+
+        onSnapshot(collection(db, 'rooms', roomId, 'callerCandidates'), snapshot => {
+          snapshot.docChanges().forEach(change => {
+            if (change.type === 'added') {
+              pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+            }
+          });
+        });
       }
     }
 
@@ -208,4 +182,4 @@
     startMedia().then(connect);
   </script>
 </body>
-</html>
+  </html>
