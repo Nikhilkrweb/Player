@@ -21,16 +21,26 @@
       background: black;
     }
 
+    /* Default: landscape */
     #remoteVideo {
       position: absolute;
-      height: 100%;
-      width: auto;
-      object-fit: contain;
-      z-index: 1;
-      background: black;
       left: 50%;
       top: 50%;
       transform: translate(-50%, -50%);
+      max-height: 100%;
+      max-width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+      z-index: 1;
+      background: black;
+      display: block;
+    }
+
+    /* Portrait mode class for vertical video */
+    #remoteVideo.portrait {
+      aspect-ratio: 9 / 16;
+      max-height: 100%;
+      max-width: 100%;
     }
 
     #localVideo {
@@ -44,6 +54,11 @@
       border: 2px solid #fff;
       z-index: 3;
       background-color: black;
+      aspect-ratio: 16 / 9;
+    }
+
+    #localVideo.portrait {
+      aspect-ratio: 9 / 16;
     }
 
     #endCall {
@@ -59,11 +74,41 @@
       height: 70px;
       padding: 0;
     }
-
     #endCall img {
       width: 100%;
       height: 100%;
       object-fit: contain;
+    }
+
+    #switchCamera {
+      position: absolute;
+      bottom: 10%;
+      right: 120px;
+      z-index: 4;
+      width: 50px;
+      height: 50px;
+      background: rgba(255,255,255,0.15);
+      border: none;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 22px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #videoQuality {
+      position: absolute;
+      bottom: 10%;
+      left: 40px;
+      z-index: 4;
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      border: none;
+      font-size: 16px;
+      border-radius: 8px;
+      padding: 6px 12px;
+      cursor: pointer;
     }
 
     #roomIdDisplay {
@@ -91,6 +136,19 @@
         height: 60px;
         bottom: 10%;
       }
+      #switchCamera {
+        width: 40px;
+        height: 40px;
+        bottom: 10%;
+        right: 70px;
+        font-size: 18px;
+      }
+      #videoQuality {
+        font-size: 14px;
+        padding: 4px 8px;
+        left: 12px;
+        bottom: 10%;
+      }
       #roomIdDisplay {
         font-size: 14px;
         padding: 6px 12px;
@@ -106,6 +164,13 @@
     <button id="endCall">
       <img src="end-call-icon.webp" alt="End Call">
     </button>
+    <button id="switchCamera" title="Switch Camera">&#8645;</button>
+    <select id="videoQuality" title="Video Quality">
+      <option value="default">Default</option>
+      <option value="hd">HD (1280x720)</option>
+      <option value="sd">SD (640x480)</option>
+      <option value="low">Low (320x240)</option>
+    </select>
   </div>
 
   <script type="module">
@@ -131,6 +196,8 @@
     const remoteVideo = document.getElementById('remoteVideo');
     const endCallBtn = document.getElementById('endCall');
     const roomIdDisplay = document.getElementById('roomIdDisplay');
+    const switchCameraBtn = document.getElementById('switchCamera');
+    const videoQualitySelect = document.getElementById('videoQuality');
 
     const roomId = localStorage.getItem('roomId');
     const isCaller = localStorage.getItem('isCaller') === 'true';
@@ -143,18 +210,83 @@
 
     const pc = new RTCPeerConnection(servers);
     let localStream;
+    let currentVideoDeviceId = null;
+    let availableVideoDevices = [];
+    let currentQuality = 'default';
+
+    // Dynamically set video aspect ratio based on stream
+    function setVideoAspect(videoEl, stream) {
+      if (!stream) return;
+      const track = stream.getVideoTracks()[0];
+      if (!track) return;
+      const settings = track.getSettings();
+      const { width, height } = settings;
+      if (width && height) {
+        if (width > height) {
+          videoEl.classList.remove('portrait');
+        } else {
+          videoEl.classList.add('portrait');
+        }
+      }
+    }
+
+    // Helper: get constraints object for selected quality and device
+    function getConstraints(quality, deviceId) {
+      let constraints = {};
+      if (quality === 'hd') {
+        constraints = { width: { exact: 1280 }, height: { exact: 720 } };
+      } else if (quality === 'sd') {
+        constraints = { width: { exact: 640 }, height: { exact: 480 } };
+      } else if (quality === 'low') {
+        constraints = { width: { exact: 320 }, height: { exact: 240 } };
+      }
+      if (deviceId) {
+        constraints.deviceId = { exact: deviceId };
+      }
+      return {
+        video: Object.keys(constraints).length > 0 ? constraints : true,
+        audio: true
+      };
+    }
+
+    // Helper: restart local stream with new constraints
+    async function restartLocalStream(quality = currentQuality, deviceId = currentVideoDeviceId) {
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+      }
+      const constraints = getConstraints(quality, deviceId);
+      localStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Replace video track in peer connection
+      const videoTrack = localStream.getVideoTracks()[0];
+      const senders = pc.getSenders().filter(sender => sender.track && sender.track.kind === "video");
+      if (senders.length && videoTrack) {
+        await senders[0].replaceTrack(videoTrack);
+      } else if (videoTrack) {
+        pc.addTrack(videoTrack, localStream);
+      }
+
+      localVideo.srcObject = localStream;
+      setVideoAspect(localVideo, localStream);
+    }
+
+    // List available cameras
+    async function getVideoDevices() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return devices.filter(device => device.kind === 'videoinput');
+    }
 
     async function startMedia() {
-      localStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      });
+      availableVideoDevices = await getVideoDevices();
+      if (availableVideoDevices.length) {
+        currentVideoDeviceId = availableVideoDevices[0].deviceId;
+      }
 
-      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-      localVideo.srcObject = localStream;
+      await restartLocalStream(currentQuality, currentVideoDeviceId);
 
       pc.ontrack = event => {
         remoteVideo.srcObject = event.streams[0];
+        setVideoAspect(remoteVideo, event.streams[0]);
       };
 
       pc.onicecandidate = async event => {
@@ -218,7 +350,30 @@
       window.location.href = "index.html";
     };
 
+    // Switch camera button handler
+    switchCameraBtn.onclick = async () => {
+      availableVideoDevices = await getVideoDevices();
+      if (availableVideoDevices.length < 2) {
+        alert("No alternative camera found.");
+        return;
+      }
+      let idx = availableVideoDevices.findIndex(d => d.deviceId === currentVideoDeviceId);
+      idx = (idx + 1) % availableVideoDevices.length;
+      currentVideoDeviceId = availableVideoDevices[idx].deviceId;
+      await restartLocalStream(currentQuality, currentVideoDeviceId);
+    };
+
+    // Video quality select handler
+    videoQualitySelect.onchange = async (e) => {
+      currentQuality = e.target.value;
+      await restartLocalStream(currentQuality, currentVideoDeviceId);
+    };
+
     startMedia().then(connect);
+
+    // Optional: Update aspect ratio on loadedmetadata (covers some browser quirks)
+    localVideo.addEventListener('loadedmetadata', () => setVideoAspect(localVideo, localVideo.srcObject));
+    remoteVideo.addEventListener('loadedmetadata', () => setVideoAspect(remoteVideo, remoteVideo.srcObject));
   </script>
 </body>
 </html>
