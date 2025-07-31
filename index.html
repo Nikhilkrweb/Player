@@ -31,6 +31,7 @@
     input {
       border: 1px solid #ccc;
       width: 250px;
+      text-align: center;
     }
   </style>
 </head>
@@ -40,18 +41,13 @@
   <button onclick="createRoom()">Create Room</button>
 
   <div>
-    <input type="text" id="roomInput" placeholder="Enter Room ID to Join" />
+    <input type="text" id="roomInput" placeholder="Enter 4-digit Room ID to Join" maxlength="4" />
     <button onclick="joinRoom()">Join Room</button>
   </div>
 
   <script>
-    function generateRoomId(length = 6) {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-      let id = '';
-      for (let i = 0; i < length; i++) {
-        id += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      return id;
+    function generateRoomId() {
+      return Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit room ID
     }
 
     function createRoom() {
@@ -63,8 +59,8 @@
 
     function joinRoom() {
       const roomId = document.getElementById('roomInput').value.trim();
-      if (roomId === '') {
-        alert('Please enter a valid Room ID.');
+      if (!/^\d{4}$/.test(roomId)) {
+        alert('Please enter a valid 4-digit Room ID.');
         return;
       }
       localStorage.setItem('roomId', roomId);
