@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Video Call</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 0;
+      text-align: center;
+    }
+    video {
+      width: 45%;
+      margin: 10px;
+      border: 2px solid #000;
+    }
+    #room-id-section {
+      margin: 20px;
+    }
+    #endCall {
+      background-color: red;
+      color: white;
+      padding: 10px 20px;
+      font-size: 16px;
+      border: none;
+      margin-top: 20px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Video Chat Room</h1>
+  <div id="room-id-section">
+    <div id="roomIdDisplay" style="display: none;"></div>
+    <input id="roomIdInput" placeholder="Enter Room ID" style="font-size: 18px; padding: 5px;" />
+    <button onclick="joinRoom()">Join</button>
+  </div>
+
+  <div id="video-section" style="display:none;">
+    <video id="localVideo" autoplay playsinline muted></video>
+    <video id="remoteVideo" autoplay playsinline></video><br>
+    <button id="endCall" onclick="endCall()">End Call</button>
+  </div>
+
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+    import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
+      authDomain: "video-chat-44584.firebaseapp.com",
+      projectId: "video-chat-44584",
+      storageBucket: "video-chat-44584.appspot.com",
+      messagingSenderId: "598757234224",
+      appId: "1:598757234224:web:1ae7b1d35abafeb7d7bff5",
+      measurementId: "G-C18BHR5LH1"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    let pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' }
+      ]
+    });
+
+    let localStream;
+    let roomRef;
+    const urlParams = new URLSearchParams(window.location.search);
+    const action = urlParams.get('action');
+
+    const localVideo = document.getElementById("localVideo");
+    const remoteVideo = document.getElementById("remoteVideo");
+    const roomIdInput = document.getElementById("roomIdInput");
+    const roomIdDisplay = document.getElementById("roomIdDisplay");
+    const roomSection = document.getElementById("room-id-section");
+    const videoSection = document.getElementById("video-section");
+
+    async function startCamera() {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      localVideo.srcObject = localStream;
+    }
+
+    pc.ontrack = (event) => {
+      remoteVideo.srcObject = event.streams[0];
+    };
+
+    pc.onicecandidate = event => {
+      if (event.candidate) {
+        const candidates = collection(roomRef, action === "create" ? "callerCandidates" : "calleeCandidates");
+        addDoc(candidates, event.candidate.toJSON());
+      }
+    };
+
+    window.joinRoom = async function () {
+      const roomId = roomIdInput.value.trim();
+      if (!roomId) return alert("Enter valid Room ID");
+
+      roomRef = doc(db, "rooms", roomId);
+      const roomSnap = await getDoc(roomRef);
+      if (!roomSnap.exists()) return alert("Room not found");
+
+      roomSection.style.display = "none";
+      videoSection.style.display = "block";
+      await startCamera();
+
+      const roomData = roomSnap.data();
+      await pc.setRemoteDescription(new RTCSessionDescription(roomData.offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      await setDoc(roomRef, { answer }, { merge: true });
+
+      onSnapshot(collection(roomRef, "callerCandidates"), snapshot => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === "added") {
+            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+          }
+        });
+      });
+
+      onSnapshot(collection(roomRef, "calleeCandidates"), () => {});
+    };
+
+    async function createRoom() {
+      await startCamera();
+
+      const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+      roomRef = doc(db, "rooms", roomId);
+      const roomSnap = await getDoc(roomRef);
+      if (roomSnap.exists()) {
+        alert("Room already exists. Try again.");
+        return location.reload();
+      }
+
+      roomIdDisplay.style.display = "block";
+      roomIdDisplay.innerHTML = `<strong>Room ID: ${roomId}</strong>`;
+      roomIdInput.style.display = "none";
+      document.querySelector("button[onclick='joinRoom()']").style.display = "none";
+      roomSection.style.display = "block";
+      videoSection.style.display = "block";
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await setDoc(roomRef, { offer });
+
+      onSnapshot(roomRef, async snapshot => {
+        const data = snapshot.data();
+        if (data?.answer) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        }
+      });
+
+      onSnapshot(collection(roomRef, "calleeCandidates"), snapshot => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === "added") {
+            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+          }
+        });
+      });
+    }
+
+    window.endCall = async function () {
+      pc.close();
+      localStream.getTracks().forEach(t => t.stop());
+      if (roomRef) await deleteDoc(roomRef);
+      location.href = "index.html";
+    };
+
+    if (action === "create") createRoom();
+  </script>
+</body>
+</html>
