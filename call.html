@@ -15,9 +15,6 @@
       background-color: #000;
       font-family: Arial, sans-serif;
       overflow: hidden;
-      display: flex;
-      justify-content: center;
-      align-items: center;
     }
 
     #roomIdDisplay {
@@ -35,12 +32,15 @@
 
     .video-container {
       position: relative;
-      width: 100%;
-      max-width: 360px;
+      width: auto;
+      height: 100%;
       aspect-ratio: 9 / 16;
+      margin: 0 auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
       background-color: #000;
-      border-radius: 16px;
-      overflow: hidden;
+      border-radius: 0;
     }
 
     #remoteVideo {
@@ -136,7 +136,7 @@
       if (videoSender) {
         const params = videoSender.getParameters();
         if (!params.encodings) params.encodings = [{}];
-        params.encodings[0].maxBitrate = 400 * 1000; // 400 kbps
+        params.encodings[0].maxBitrate = 400 * 1000;
         await videoSender.setParameters(params);
       }
 
