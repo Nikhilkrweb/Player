@@ -2,7 +2,6 @@
 <html>
 <head>
   <title>Video Call</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     * {
       margin: 0;
@@ -11,7 +10,7 @@
     }
 
     html, body {
-      height: 100dvh;
+      height: 100%;
       width: 100%;
       background-color: #000;
       font-family: Arial, sans-serif;
@@ -34,13 +33,14 @@
     .video-container {
       position: relative;
       width: auto;
-      height: 100dvh;
+      height: 100%;
       aspect-ratio: 9 / 16;
       margin: 0 auto;
       display: flex;
       justify-content: center;
       align-items: center;
       background-color: #000;
+      border-radius: 0;
     }
 
     #remoteVideo {
@@ -51,10 +51,10 @@
 
     #localVideo {
       position: absolute;
-      bottom: 80px;
+      bottom: 16px;
       right: 16px;
-      width: 90px;
-      height: 130px;
+      width: 100px;
+      height: 140px;
       border-radius: 10px;
       object-fit: cover;
       border: 2px solid #fff;
@@ -75,23 +75,46 @@
       font-size: 24px;
       cursor: pointer;
       z-index: 3;
-      display: flex;
-      align-items: center;
-      justify-content: center;
     }
 
-    @media screen and (max-width: 600px) {
+    /* Responsive layout for mobile view (Android) */
+    @media screen and (max-width: 768px) {
+      .video-container {
+        width: 80%; /* Make the container smaller on mobile */
+        height: auto;
+        aspect-ratio: 9 / 16; /* Maintain portrait ratio */
+      }
+
       #localVideo {
         width: 80px;
-        height: 110px;
-        bottom: 100px;
+        height: 120px;
+        bottom: 10px; /* Adjust position for mobile */
+      }
+
+      #roomIdDisplay {
+        font-size: 14px;
+        top: 10px; /* Reduce space for mobile */
       }
 
       #endCall {
-        bottom: 16px;
-        width: 56px;
-        height: 56px;
-        font-size: 20px;
+        width: 50px;
+        height: 50px;
+        font-size: 20px; /* Adjust size of button */
+      }
+    }
+
+    /* Additional responsiveness for very small screens (portrait view) */
+    @media screen and (max-width: 480px) {
+      #localVideo {
+        width: 70px;
+        height: 100px;
+        bottom: 10px; /* Adjust local video position further */
+      }
+
+      #endCall {
+        width: 45px;
+        height: 45px;
+        font-size: 18px; /* Smaller end call button */
       }
     }
   </style>
