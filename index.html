@@ -1,152 +1,27 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
   <title>Video Chat - Firebase + WebRTC</title>
   <style>
-    body { font-family: Arial; text-align: center; padding: 20px; }
-    video { width: 45%; margin: 10px; border: 2px solid #555; border-radius: 10px; }
-    input, button { padding: 8px 16px; margin: 10px; font-size: 16px; }
+    body {
+      font-family: sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      flex-direction: column;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 18px;
+      margin: 10px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
-  <h2>Firebase + WebRTC Video Chat</h2>
-
-  <video id="localVideo" autoplay muted playsinline></video>
-  <video id="remoteVideo" autoplay playsinline></video>
-
-  <div>
-    <button onclick="createRoom()">Create Room</button>
-    <input id="roomIdInput" placeholder="Enter 4-digit Room ID">
-    <button onclick="joinRoom()">Join Room</button>
-  </div>
-
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-    import {
-      getFirestore, doc, setDoc, getDoc, updateDoc,
-      collection, addDoc, onSnapshot
-    } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
-
-    const firebaseConfig = {
-      apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
-      authDomain: "video-chat-44584.firebaseapp.com",
-      projectId: "video-chat-44584",
-      storageBucket: "video-chat-44584.firebasestorage.app",
-      messagingSenderId: "598757234224",
-      appId: "1:598757234224:web:1ae7b1d35abafeb7d7bff5",
-      measurementId: "G-C18BHR5LH1"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-
-    const localVideo = document.getElementById('localVideo');
-    const remoteVideo = document.getElementById('remoteVideo');
-    const roomIdInput = document.getElementById('roomIdInput');
-
-    const servers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-    let pc = new RTCPeerConnection(servers);
-    let localStream, remoteStream;
-    let roomRef;
-
-    async function startCamera() {
-      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-      localVideo.srcObject = localStream;
-
-      remoteStream = new MediaStream();
-      remoteVideo.srcObject = remoteStream;
-
-      pc.ontrack = event => {
-        event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
-      };
-    }
-
-    pc.onicecandidate = async (event) => {
-      if (event.candidate && roomRef) {
-        const candidate = event.candidate.toJSON();
-        const candidateCol = pc.signalingState === "have-local-offer"
-          ? collection(roomRef, "callerCandidates")
-          : collection(roomRef, "calleeCandidates");
-        await addDoc(candidateCol, candidate);
-      }
-    };
-
-    window.createRoom = async function () {
-      await startCamera();
-
-      const roomId = Math.floor(1000 + Math.random() * 9000).toString();
-      roomRef = doc(db, "rooms", roomId);
-      const roomSnap = await getDoc(roomRef);
-
-      if (roomSnap.exists()) {
-        alert("Room ID already exists. Please try again.");
-        return;
-      }
-
-      roomIdInput.value = roomId;
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      await setDoc(roomRef, { offer });
-
-      onSnapshot(roomRef, async (docSnap) => {
-        const data = docSnap.data();
-        if (!pc.currentRemoteDescription && data?.answer) {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-        }
-      });
-
-      const calleeCandidates = collection(roomRef, "calleeCandidates");
-      onSnapshot(calleeCandidates, (snapshot) => {
-        snapshot.docChanges().forEach(change => {
-          if (change.type === "added") {
-            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-          }
-        });
-      });
-    };
-
-    window.joinRoom = async function () {
-      await startCamera();
-
-      const roomId = roomIdInput.value.trim();
-      if (!/^\d{4}$/.test(roomId)) {
-        alert("Please enter a valid 4-digit Room ID.");
-        return;
-      }
-
-      roomRef = doc(db, "rooms", roomId);
-      const roomSnap = await getDoc(roomRef);
-      if (!roomSnap.exists()) {
-        alert("Room not found.");
-        return;
-      }
-
-      const data = roomSnap.data();
-      await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await updateDoc(roomRef, { answer });
-
-      const callerCandidates = collection(roomRef, "callerCandidates");
-      const calleeCandidates = collection(roomRef, "calleeCandidates");
-
-      onSnapshot(callerCandidates, (snapshot) => {
-        snapshot.docChanges().forEach(change => {
-          if (change.type === "added") {
-            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-          }
-        });
-      });
-
-      pc.onicecandidate = async (event) => {
-        if (event.candidate) {
-          await addDoc(calleeCandidates, event.candidate.toJSON());
-        }
-      };
-    };
-  </script>
+  <h1>Video Chat</h1>
+  <button onclick="location.href='call.html?action=create'">Create Room</button>
+  <button onclick="location.href='call.html?action=join'">Join Room</button>
 </body>
 </html>
