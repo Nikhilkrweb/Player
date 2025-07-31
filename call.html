@@ -4,40 +4,49 @@
   <title>Video Call</title>
   <style>
     body {
-      margin: 0;
-      background-color: #000;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      height: 100vh;
+      background: #f4f4f4;
+      font-family: Arial, sans-serif;
+      padding: 20px;
     }
+
+    #roomIdDisplay {
+      margin-bottom: 10px;
+      font-size: 20px;
+      font-weight: bold;
+    }
+
     video {
       width: 90%;
-      max-width: 600px;
-      margin: 10px;
-      background: #333;
+      max-width: 500px;
+      margin: 10px 0;
+      border-radius: 10px;
+      background: black;
     }
+
     #endCall {
+      margin-top: 20px;
       padding: 10px 20px;
-      font-size: 16px;
-      background: red;
+      font-size: 18px;
+      background-color: red;
       color: white;
       border: none;
       border-radius: 5px;
-      margin-top: 20px;
       cursor: pointer;
     }
   </style>
 </head>
 <body>
+  <div id="roomIdDisplay">Room ID: ...</div>
   <video id="localVideo" autoplay muted playsinline></video>
   <video id="remoteVideo" autoplay playsinline></video>
   <button id="endCall">End Call</button>
 
   <script type="module">
-    import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
-    import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+    import { getFirestore, doc, setDoc, getDoc, deleteDoc, onSnapshot, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
@@ -45,128 +54,97 @@
       projectId: "video-chat-44584",
       storageBucket: "video-chat-44584.appspot.com",
       messagingSenderId: "598757234224",
-      appId: "1:598757234224:web:1ae7b1d35abafeb7d7bff5",
-      measurementId: "G-C18BHR5LH1"
+      appId: "1:598757234224:web:1ae7b1d35abafeb7d7bff5"
     };
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    const roomId = localStorage.getItem('roomId');
-    const isCaller = localStorage.getItem('isCaller') === 'true';
-    const roomRef = doc(db, 'rooms', roomId);
-
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
     const endCallBtn = document.getElementById('endCall');
+    const roomId = localStorage.getItem('roomId');
+    const isCaller = localStorage.getItem('isCaller') === 'true';
 
-    let pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-      ]
-    });
+    document.getElementById("roomIdDisplay").innerText = "Room ID: " + roomId;
 
+    const servers = {
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    };
+
+    const pc = new RTCPeerConnection(servers);
     let localStream;
-    let remoteStream = new MediaStream();
 
-    remoteVideo.srcObject = remoteStream;
-
-    pc.ontrack = (event) => {
-      event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
-    };
-
-    pc.onicecandidate = async (event) => {
-      if (event.candidate) {
-        const field = isCaller ? 'callerCandidates' : 'calleeCandidates';
-        const candidatesRef = doc(db, `rooms/${roomId}/${field}/${event.candidate.sdpMid}`);
-        await setDoc(candidatesRef, event.candidate.toJSON());
-      }
-    };
-
-    // Add local stream
-    async function start() {
+    async function startMedia() {
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
       localVideo.srcObject = localStream;
 
-      const roomSnapshot = await getDoc(roomRef);
+      pc.ontrack = event => {
+        remoteVideo.srcObject = event.streams[0];
+      };
 
-      if (roomSnapshot.exists()) {
-        // Room exists
-        if (!isCaller) {
-          const roomData = roomSnapshot.data();
-          await pc.setRemoteDescription(new RTCSessionDescription(roomData.offer));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          await updateDoc(roomRef, { answer });
-
-          // Listen for ICE candidates
-          onSnapshot(doc(db, `rooms/${roomId}/callerCandidates/candidate`), (docSnap) => {
-            if (docSnap.exists()) {
-              const data = docSnap.data();
-              if (data) pc.addIceCandidate(new RTCIceCandidate(data));
-            }
-          });
-        } else {
-          // Listen for answer
-          onSnapshot(roomRef, async (snapshot) => {
-            const data = snapshot.data();
-            if (data?.answer && !pc.currentRemoteDescription) {
-              await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-            }
-          });
-
-          // Listen for ICE candidates
-          onSnapshot(doc(db, `rooms/${roomId}/calleeCandidates/candidate`), (docSnap) => {
-            if (docSnap.exists()) {
-              const data = docSnap.data();
-              if (data) pc.addIceCandidate(new RTCIceCandidate(data));
-            }
-          });
+      pc.onicecandidate = async event => {
+        if (event.candidate) {
+          const candidateCol = collection(db, 'rooms', roomId, isCaller ? 'callerCandidates' : 'calleeCandidates');
+          await addDoc(candidateCol, event.candidate.toJSON());
         }
-      } else if (isCaller) {
-        // Room doesn't exist, creator creates offer
+      };
+    }
+
+    async function connect() {
+      const roomRef = doc(db, 'rooms', roomId);
+      const roomSnap = await getDoc(roomRef);
+
+      if (isCaller) {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        await setDoc(roomRef, { offer });
 
-        const roomWithOffer = { offer: { type: offer.type, sdp: offer.sdp } };
-        await setDoc(roomRef, roomWithOffer);
-
-        // Listen for answer
-        onSnapshot(roomRef, async (snapshot) => {
-          const data = snapshot.data();
+        onSnapshot(roomRef, async (snap) => {
+          const data = snap.data();
           if (data?.answer && !pc.currentRemoteDescription) {
             await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
           }
         });
 
-        // Listen for ICE candidates
-        onSnapshot(doc(db, `rooms/${roomId}/calleeCandidates/candidate`), (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            if (data) pc.addIceCandidate(new RTCIceCandidate(data));
-          }
+        onSnapshot(collection(db, 'rooms', roomId, 'calleeCandidates'), (snapshot) => {
+          snapshot.docChanges().forEach(change => {
+            if (change.type === 'added') {
+              pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+            }
+          });
         });
+
+      } else {
+        if (roomSnap.exists()) {
+          const data = roomSnap.data();
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await setDoc(roomRef, { ...data, answer });
+
+          onSnapshot(collection(db, 'rooms', roomId, 'callerCandidates'), (snapshot) => {
+            snapshot.docChanges().forEach(change => {
+              if (change.type === 'added') {
+                pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+              }
+            });
+          });
+        } else {
+          alert("Room does not exist!");
+        }
       }
     }
 
-    start();
-
     endCallBtn.onclick = async () => {
-      localStorage.removeItem('roomId');
-      localStorage.removeItem('isCaller');
-
-      // Close Firebase room
-      await deleteDoc(roomRef);
-
-      // Close peer connection
-      pc.close();
-
-      // Stop local stream
-      localStream.getTracks().forEach(track => track.stop());
-
-      window.location.href = 'index.html';
+      await deleteDoc(doc(db, "rooms", roomId));
+      localStorage.removeItem("roomId");
+      localStorage.removeItem("isCaller");
+      window.location.href = "index.html";
     };
+
+    startMedia().then(connect);
   </script>
 </body>
 </html>
