@@ -121,60 +121,101 @@
         width: 40px;
         height: 40px;
         bottom: 10%;
+        right: 30%;
+        font-size: 18px;
+      }
+      #videoQuality {
+        font-size: 14px;
+        padding: 4px 8px;
+        left: 12px;
+        bottom: 10%;
+      }
+      #roomIdDisplay {
+        font-size: 14px;
+        padding: 6px 12px;
       }
     }
   </style>
 </head>
 <body>
   <div id="videoContainer">
+    <div id="roomIdDisplay">Room: Loading...</div>
     <video id="remoteVideo" autoplay playsinline></video>
     <video id="localVideo" autoplay muted playsinline></video>
-    <button id="endCall"><img src="endcall.png" alt="End Call"></button>
-    <button id="switchCamera">&#8645;</button>
-    <select id="videoQuality">
-      <option value="default">Default</option>
-      <option value="low">Low</option>
-      <option value="medium">Medium</option>
-      <option value="high">High</option>
+    <button id="endCall">
+      <img src="end-call-icon.webp" alt="End Call">
+    </button>
+    <button id="switchCamera" title="Switch Camera">&#8645;</button>
+    <select id="videoQuality" title="Video Quality">
+      <option value="low" selected>Low (426x240)</option>
+      <option value="sd">SD (854x480)</option>
+      <option value="hd">HD (1280x720)</option>
+      <option value="default">Max Resolution</option>
     </select>
-    <div id="roomIdDisplay"></div>
   </div>
-  <script>
-    // Simple PeerConnection and Media management example for demo purposes.
-    // Replace signaling and server interaction logic with your own as needed.
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+    import {
+      getFirestore, doc, setDoc, getDoc,
+      deleteDoc, onSnapshot, collection, addDoc
+    } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-    let localStream, pc;
-    let currentQuality = 'default';
-    let currentVideoDeviceId = null;
+    const firebaseConfig = {
+      apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
+      authDomain: "video-chat-44584.firebaseapp.com",
+      projectId: "video-chat-44584",
+      storageBucket: "video-chat-44584.appspot.com",
+      messagingSenderId: "598757234224",
+      appId: "1:598757234224:web:1ae7b1d35abafeb7d7bff5"
+    };
 
-    const videoQualitySelect = document.getElementById('videoQuality');
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
+    const endCallBtn = document.getElementById('endCall');
+    const roomIdDisplay = document.getElementById('roomIdDisplay');
+    const switchCameraBtn = document.getElementById('switchCamera');
+    const videoQualitySelect = document.getElementById('videoQuality');
 
-    // Helper: get constraints
+    const roomId = localStorage.getItem('roomId');
+    const isCaller = localStorage.getItem('isCaller') === 'true';
+
+    roomIdDisplay.textContent = `Room: ${roomId || 'N/A'}`;
+
+    const servers = {
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    };
+
+    const pc = new RTCPeerConnection(servers);
+    let localStream;
+    let currentVideoDeviceId = null;
+    let availableVideoDevices = [];
+    // Start with low (426x240) as default
+    let currentQuality = 'low';
+
     function getConstraints(quality, deviceId) {
-      let constraints = {
-        video: { deviceId: deviceId ? { exact: deviceId } : undefined },
+      let constraints = {};
+      // Always set max frameRate to 15
+      if (quality === 'hd') {
+        constraints = { width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: 16/9, frameRate: { max: 15, ideal: 15 } };
+      } else if (quality === 'sd') {
+        constraints = { width: { ideal: 854 }, height: { ideal: 480 }, aspectRatio: 16/9, frameRate: { max: 15, ideal: 15 } };
+      } else if (quality === 'low') {
+        constraints = { width: { ideal: 426 }, height: { ideal: 240 }, aspectRatio: 16/9, frameRate: { max: 15, ideal: 15 } };
+      } else { // "default" (max resolution)
+        constraints = { aspectRatio: 16/9, frameRate: { max: 60, ideal: 30 } };
+      }
+      if (deviceId) {
+        constraints.deviceId = { exact: deviceId };
+      }
+      return {
+        video: constraints,
         audio: true
       };
-      switch (quality) {
-        case 'low':
-          constraints.video.width = { max: 320 };
-          constraints.video.height = { max: 240 };
-          break;
-        case 'medium':
-          constraints.video.width = { max: 640 };
-          constraints.video.height = { max: 480 };
-          break;
-        case 'high':
-          constraints.video.width = { max: 1280 };
-          constraints.video.height = { max: 720 };
-          break;
-      }
-      return constraints;
     }
 
-    // Restart local stream and update PeerConnection
     async function restartLocalStream(quality = currentQuality, deviceId = currentVideoDeviceId) {
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
@@ -183,6 +224,7 @@
       try {
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
       } catch (e) {
+        // fallback to max resolution if requested fails
         try {
           constraints = getConstraints('default', deviceId);
           localStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -193,70 +235,111 @@
           throw err;
         }
       }
-      // Handle video track
+      // Replace video track in peer connection
       const videoTrack = localStream.getVideoTracks()[0];
-      const videoSenders = pc.getSenders().filter(sender => sender.track && sender.track.kind === "video");
-      if (videoSenders.length && videoTrack) {
-        await videoSenders[0].replaceTrack(videoTrack);
+      const senders = pc.getSenders().filter(sender => sender.track && sender.track.kind === "video");
+      if (senders.length && videoTrack) {
+        await senders[0].replaceTrack(videoTrack);
       } else if (videoTrack) {
         pc.addTrack(videoTrack, localStream);
-      }
-      // Handle audio track
-      const audioTrack = localStream.getAudioTracks()[0];
-      const audioSenders = pc.getSenders().filter(sender => sender.track && sender.track.kind === "audio");
-      if (audioSenders.length && audioTrack) {
-        await audioSenders[0].replaceTrack(audioTrack);
-      } else if (audioTrack) {
-        pc.addTrack(audioTrack, localStream);
       }
       localVideo.srcObject = localStream;
     }
 
-    // Switch camera (if multiple)
-    document.getElementById('switchCamera').onclick = async () => {
+    async function getVideoDevices() {
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(device => device.kind === 'videoinput');
-      if (videoDevices.length > 1) {
-        let idx = videoDevices.findIndex(d => d.deviceId === currentVideoDeviceId);
-        idx = (idx + 1) % videoDevices.length;
-        currentVideoDeviceId = videoDevices[idx].deviceId;
-        restartLocalStream(currentQuality, currentVideoDeviceId);
+      return devices.filter(device => device.kind === 'videoinput');
+    }
+
+    async function startMedia() {
+      availableVideoDevices = await getVideoDevices();
+      if (availableVideoDevices.length) {
+        currentVideoDeviceId = availableVideoDevices[0].deviceId;
       }
-    };
+      await restartLocalStream(currentQuality, currentVideoDeviceId);
 
-    // Change video quality
-    videoQualitySelect.onchange = () => {
-      currentQuality = videoQualitySelect.value;
-      restartLocalStream(currentQuality, currentVideoDeviceId);
-    };
-
-    // Setup PeerConnection
-    async function setupConnection() {
-      pc = new RTCPeerConnection();
-      pc.onicecandidate = event => {
-        // Send event.candidate to remote peer via signaling server
-      };
       pc.ontrack = event => {
         remoteVideo.srcObject = event.streams[0];
       };
-      await restartLocalStream();
-      // Add all tracks (video & audio) to PeerConnection
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream);
-      });
+
+      pc.onicecandidate = async event => {
+        if (event.candidate) {
+          const candidateCol = collection(db, 'rooms', roomId, isCaller ? 'callerCandidates' : 'calleeCandidates');
+          await addDoc(candidateCol, event.candidate.toJSON());
+        }
+      };
     }
 
-    // End call button
-    document.getElementById('endCall').onclick = () => {
-      if (pc) pc.close();
-      if (localStream) localStream.getTracks().forEach(track => track.stop());
-      remoteVideo.srcObject = null;
-      localVideo.srcObject = null;
-      alert('Call ended.');
+    async function connect() {
+      const roomRef = doc(db, 'rooms', roomId);
+      const roomSnap = await getDoc(roomRef);
+      if (isCaller) {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await setDoc(roomRef, { offer });
+
+        onSnapshot(roomRef, async snap => {
+          const data = snap.data();
+          if (data?.answer && !pc.currentRemoteDescription) {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          }
+        });
+
+        onSnapshot(collection(db, 'rooms', roomId, 'calleeCandidates'), snapshot => {
+          snapshot.docChanges().forEach(change => {
+            if (change.type === 'added') {
+              pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+            }
+          });
+        });
+      } else {
+        if (!roomSnap.exists()) {
+          alert("Room does not exist!");
+          return;
+        }
+        const data = roomSnap.data();
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await setDoc(roomRef, { ...data, answer });
+        onSnapshot(collection(db, 'rooms', roomId, 'callerCandidates'), snapshot => {
+          snapshot.docChanges().forEach(change => {
+            if (change.type === 'added') {
+              pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+            }
+          });
+        });
+      }
+    }
+
+    endCallBtn.onclick = async () => {
+      await deleteDoc(doc(db, "rooms", roomId));
+      localStorage.removeItem("roomId");
+      localStorage.removeItem("isCaller");
+      window.location.href = "index.html";
     };
 
-    // Initialize on load
-    window.onload = setupConnection;
+    switchCameraBtn.onclick = async () => {
+      availableVideoDevices = await getVideoDevices();
+      if (availableVideoDevices.length < 2) {
+        alert("No alternative camera found.");
+        return;
+      }
+      let idx = availableVideoDevices.findIndex(d => d.deviceId === currentVideoDeviceId);
+      idx = (idx + 1) % availableVideoDevices.length;
+      currentVideoDeviceId = availableVideoDevices[idx].deviceId;
+      await restartLocalStream(currentQuality, currentVideoDeviceId);
+    };
+
+    videoQualitySelect.onchange = async (e) => {
+      currentQuality = e.target.value;
+      await restartLocalStream(currentQuality, currentVideoDeviceId);
+    };
+
+    // Set select to Low by default on reload (for safety)
+    videoQualitySelect.value = 'low';
+
+    startMedia().then(connect);
   </script>
 </body>
 </html>
