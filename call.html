@@ -44,7 +44,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-    import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+    import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
@@ -68,6 +68,7 @@
 
     let localStream;
     let roomRef;
+    let roomId;
 
     const localVideo = document.getElementById("localVideo");
     const remoteVideo = document.getElementById("remoteVideo");
@@ -94,8 +95,10 @@
     };
 
     window.joinRoom = async function () {
-      const roomId = roomIdInput.value.trim();
+      roomId = roomIdInput.value.trim();
       if (!roomId) return alert("Enter valid Room ID");
+
+      localStorage.setItem("roomId", roomId);
 
       roomRef = doc(db, "rooms", roomId);
       const roomSnap = await getDoc(roomRef);
@@ -124,18 +127,36 @@
     async function createRoom() {
       await startCamera();
 
-      let roomId = sessionStorage.getItem("createdRoomId");
+      roomId = localStorage.getItem("roomId");
+
       if (!roomId) {
         roomId = Math.floor(1000 + Math.random() * 9000).toString();
-        sessionStorage.setItem("createdRoomId", roomId);
+        localStorage.setItem("roomId", roomId);
       }
 
       roomRef = doc(db, "rooms", roomId);
       const roomSnap = await getDoc(roomRef);
       if (roomSnap.exists()) {
-        alert("Room already exists. Refreshing...");
-        sessionStorage.removeItem("createdRoomId");
-        return location.reload();
+        console.log("Room already exists. Reusing.");
+      } else {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await setDoc(roomRef, { offer });
+
+        onSnapshot(roomRef, async snapshot => {
+          const data = snapshot.data();
+          if (data?.answer) {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          }
+        });
+
+        onSnapshot(collection(roomRef, "calleeCandidates"), snapshot => {
+          snapshot.docChanges().forEach(change => {
+            if (change.type === "added") {
+              pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+            }
+          });
+        });
       }
 
       roomIdDisplay.style.display = "block";
@@ -144,33 +165,28 @@
       document.querySelector("button[onclick='joinRoom()']").style.display = "none";
       roomSection.style.display = "block";
       videoSection.style.display = "block";
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      await setDoc(roomRef, { offer });
-
-      onSnapshot(roomRef, async snapshot => {
-        const data = snapshot.data();
-        if (data?.answer) {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-        }
-      });
-
-      onSnapshot(collection(roomRef, "calleeCandidates"), snapshot => {
-        snapshot.docChanges().forEach(change => {
-          if (change.type === "added") {
-            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-          }
-        });
-      });
     }
 
     window.endCall = async function () {
-      pc.close();
-      localStream.getTracks().forEach(t => t.stop());
-      if (roomRef) await deleteDoc(roomRef);
-      sessionStorage.removeItem("createdRoomId");
-      location.href = "index.html";
+      try {
+        pc.close();
+        localStream.getTracks().forEach(track => track.stop());
+
+        if (roomRef) {
+          const callerCandidates = await getDocs(collection(roomRef, "callerCandidates"));
+          callerCandidates.forEach(async doc => await deleteDoc(doc.ref));
+
+          const calleeCandidates = await getDocs(collection(roomRef, "calleeCandidates"));
+          calleeCandidates.forEach(async doc => await deleteDoc(doc.ref));
+
+          await deleteDoc(roomRef);
+        }
+
+        localStorage.removeItem("roomId");
+        location.href = "index.html";
+      } catch (e) {
+        console.error("Error closing room:", e);
+      }
     };
 
     if (action === "create") {
