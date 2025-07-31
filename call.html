@@ -42,7 +42,6 @@
     <button id="endCall" onclick="endCall()">End Call</button>
   </div>
 
-  <!-- Firebase -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
     import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
@@ -60,16 +59,15 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    let pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' }
-      ]
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const action = urlParams.get('action');
 
     let localStream;
     let roomRef;
-    const urlParams = new URLSearchParams(window.location.search);
-    const action = urlParams.get('action');
 
     const localVideo = document.getElementById("localVideo");
     const remoteVideo = document.getElementById("remoteVideo");
@@ -89,7 +87,7 @@
     };
 
     pc.onicecandidate = event => {
-      if (event.candidate) {
+      if (event.candidate && roomRef) {
         const candidates = collection(roomRef, action === "create" ? "callerCandidates" : "calleeCandidates");
         addDoc(candidates, event.candidate.toJSON());
       }
@@ -121,18 +119,22 @@
           }
         });
       });
-
-      onSnapshot(collection(roomRef, "calleeCandidates"), () => {});
     };
 
     async function createRoom() {
       await startCamera();
 
-      const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+      let roomId = sessionStorage.getItem("createdRoomId");
+      if (!roomId) {
+        roomId = Math.floor(1000 + Math.random() * 9000).toString();
+        sessionStorage.setItem("createdRoomId", roomId);
+      }
+
       roomRef = doc(db, "rooms", roomId);
       const roomSnap = await getDoc(roomRef);
       if (roomSnap.exists()) {
-        alert("Room already exists. Try again.");
+        alert("Room already exists. Refreshing...");
+        sessionStorage.removeItem("createdRoomId");
         return location.reload();
       }
 
@@ -167,10 +169,13 @@
       pc.close();
       localStream.getTracks().forEach(t => t.stop());
       if (roomRef) await deleteDoc(roomRef);
+      sessionStorage.removeItem("createdRoomId");
       location.href = "index.html";
     };
 
-    if (action === "create") createRoom();
+    if (action === "create") {
+      createRoom();
+    }
   </script>
 </body>
 </html>
