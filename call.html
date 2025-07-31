@@ -201,19 +201,19 @@
     function getConstraints(quality, deviceId) {
       let constraints = {};
       if (quality === 'hd') {
-        constraints = { width: { exact: 1280 }, height: { exact: 720 } }; // 16:9
+        constraints = { width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: 16/9 };
       } else if (quality === 'sd') {
-        constraints = { width: { exact: 854 }, height: { exact: 480 } }; // 16:9
+        constraints = { width: { ideal: 854 }, height: { ideal: 480 }, aspectRatio: 16/9 };
       } else if (quality === 'low') {
-        constraints = { width: { exact: 426 }, height: { exact: 240 } }; // 16:9
+        constraints = { width: { ideal: 426 }, height: { ideal: 240 }, aspectRatio: 16/9 };
+      } else { // default
+        constraints = { aspectRatio: 16/9 };
       }
       if (deviceId) {
         constraints.deviceId = { exact: deviceId };
       }
-      // Always request 16:9
-      constraints.aspectRatio = { exact: 16/9 };
       return {
-        video: Object.keys(constraints).length > 0 ? constraints : { aspectRatio: 16/9 },
+        video: constraints,
         audio: true
       };
     }
@@ -222,9 +222,21 @@
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
       }
-      const constraints = getConstraints(quality, deviceId);
-      localStream = await navigator.mediaDevices.getUserMedia(constraints);
-
+      let constraints = getConstraints(quality, deviceId);
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (e) {
+        // fallback to default
+        try {
+          constraints = getConstraints('default', deviceId);
+          localStream = await navigator.mediaDevices.getUserMedia(constraints);
+          videoQualitySelect.value = 'default';
+          currentQuality = 'default';
+        } catch (err) {
+          alert("Unable to access camera at requested quality.");
+          throw err;
+        }
+      }
       // Replace video track in peer connection
       const videoTrack = localStream.getVideoTracks()[0];
       const senders = pc.getSenders().filter(sender => sender.track && sender.track.kind === "video");
@@ -233,7 +245,6 @@
       } else if (videoTrack) {
         pc.addTrack(videoTrack, localStream);
       }
-
       localVideo.srcObject = localStream;
       setVideoAspect(localVideo, localStream);
     }
