@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <title>Video Chat - Firebase + WebRTC</title>
   <style>
-    video { width: 45%; margin: 10px; border: 2px solid #555; border-radius: 10px; }
     body { font-family: Arial; text-align: center; padding: 20px; }
-    input, button { padding: 8px 16px; margin: 10px; }
+    video { width: 45%; margin: 10px; border: 2px solid #555; border-radius: 10px; }
+    input, button { padding: 8px 16px; margin: 10px; font-size: 16px; }
   </style>
 </head>
 <body>
@@ -17,13 +17,16 @@
 
   <div>
     <button onclick="createRoom()">Create Room</button>
-    <input id="roomIdInput" placeholder="Enter Room ID">
+    <input id="roomIdInput" placeholder="Enter 4-digit Room ID">
     <button onclick="joinRoom()">Join Room</button>
   </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-    import { getFirestore, collection, doc, setDoc, updateDoc, getDoc, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+    import {
+      getFirestore, doc, setDoc, getDoc, updateDoc,
+      collection, addDoc, onSnapshot
+    } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
@@ -56,9 +59,7 @@
       remoteVideo.srcObject = remoteStream;
 
       pc.ontrack = event => {
-        event.streams[0].getTracks().forEach(track => {
-          remoteStream.addTrack(track);
-        });
+        event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
       };
     }
 
@@ -74,8 +75,17 @@
 
     window.createRoom = async function () {
       await startCamera();
-      roomRef = await addDoc(collection(db, "rooms"), {});
-      roomIdInput.value = roomRef.id;
+
+      const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+      roomRef = doc(db, "rooms", roomId);
+      const roomSnap = await getDoc(roomRef);
+
+      if (roomSnap.exists()) {
+        alert("Room ID already exists. Please try again.");
+        return;
+      }
+
+      roomIdInput.value = roomId;
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -100,17 +110,22 @@
 
     window.joinRoom = async function () {
       await startCamera();
+
       const roomId = roomIdInput.value.trim();
+      if (!/^\d{4}$/.test(roomId)) {
+        alert("Please enter a valid 4-digit Room ID.");
+        return;
+      }
+
       roomRef = doc(db, "rooms", roomId);
       const roomSnap = await getDoc(roomRef);
       if (!roomSnap.exists()) {
-        alert("Room not found");
+        alert("Room not found.");
         return;
       }
 
       const data = roomSnap.data();
       await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       await updateDoc(roomRef, { answer });
@@ -119,14 +134,6 @@
       const calleeCandidates = collection(roomRef, "calleeCandidates");
 
       onSnapshot(callerCandidates, (snapshot) => {
-        snapshot.docChanges().forEach(change => {
-          if (change.type === "added") {
-            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-          }
-        });
-      });
-
-      onSnapshot(calleeCandidates, (snapshot) => {
         snapshot.docChanges().forEach(change => {
           if (change.type === "added") {
             pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
