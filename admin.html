@@ -1,72 +1,61 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Admin Panel - Active Rooms</title>
+  <title>Admin Panel - Video Rooms</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
+      font-family: sans-serif;
       padding: 20px;
       background-color: #f4f4f4;
+      color: #333;
     }
 
     h1 {
-      text-align: center;
-      color: #333;
+      color: #1d557d;
     }
 
     #roomList {
       margin-top: 20px;
       padding: 0;
+      list-style: none;
     }
 
-    .room-item {
-      background: white;
-      margin: 10px 0;
-      padding: 12px 16px;
+    li {
+      padding: 10px;
+      background-color: #fff;
+      margin-bottom: 10px;
+      border: 1px solid #ddd;
       border-radius: 6px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
     }
 
-    .room-id {
-      font-weight: bold;
-      color: #333;
-    }
-
-    #deleteAll {
-      background-color: #e53935;
+    button {
+      padding: 10px 20px;
+      background-color: red;
       color: white;
-      padding: 12px 18px;
-      font-size: 16px;
       border: none;
       border-radius: 6px;
+      font-size: 16px;
       cursor: pointer;
-      margin: 20px auto;
-      display: block;
     }
 
-    #deleteAll:hover {
-      background-color: #c62828;
-    }
-
-    .loading {
-      text-align: center;
-      color: #555;
+    #status {
+      margin-top: 20px;
+      font-weight: bold;
     }
   </style>
 </head>
 <body>
-  <h1>Active Rooms</h1>
-  <button id="deleteAll">Delete All Rooms</button>
-  <div id="roomList" class="loading">Loading...</div>
 
+  <h1>Admin Panel</h1>
+  <button id="deleteRooms">Delete All Rooms</button>
+
+  <ul id="roomList"></ul>
+  <div id="status"></div>
+
+  <!-- Firebase -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-    import { getFirestore, collection, getDocs, deleteDoc, doc, getDoc, collectionGroup } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getFirestore, collection, getDocs, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
@@ -74,69 +63,47 @@
       projectId: "video-chat-44584",
       storageBucket: "video-chat-44584.appspot.com",
       messagingSenderId: "598757234224",
-      appId: "1:598757234224:web:1ae7b1d35abafeb7d7bff5",
-      measurementId: "G-C18BHR5LH1"
+      appId: "1:598757234224:web:1ae7b1d35abafeb7d7bff5"
     };
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
-    const roomListDiv = document.getElementById("roomList");
-    const deleteAllBtn = document.getElementById("deleteAll");
+
+    const roomList = document.getElementById('roomList');
+    const status = document.getElementById('status');
+    const deleteButton = document.getElementById('deleteRooms');
 
     async function loadRooms() {
-      roomListDiv.innerHTML = '<p class="loading">Loading rooms...</p>';
-      const roomsSnapshot = await getDocs(collection(db, "rooms"));
-      const rooms = roomsSnapshot.docs;
-
-      if (rooms.length === 0) {
-        roomListDiv.innerHTML = "<p>No active rooms found.</p>";
+      roomList.innerHTML = '';
+      const querySnapshot = await getDocs(collection(db, "rooms"));
+      if (querySnapshot.empty) {
+        roomList.innerHTML = '<li>No rooms available</li>';
         return;
       }
 
-      roomListDiv.innerHTML = "";
-
-      for (const docSnap of rooms) {
-        const roomId = docSnap.id;
-
-        const roomDiv = document.createElement("div");
-        roomDiv.className = "room-item";
-        roomDiv.innerHTML = `
-          <span class="room-id">Room ID: ${roomId}</span>
-        `;
-        roomListDiv.appendChild(roomDiv);
-      }
+      querySnapshot.forEach((docSnap) => {
+        const li = document.createElement('li');
+        li.textContent = `Room ID: ${docSnap.id}`;
+        roomList.appendChild(li);
+      });
     }
 
     async function deleteAllRooms() {
-      if (!confirm("Are you sure you want to delete all rooms?")) return;
-
-      const roomsSnapshot = await getDocs(collection(db, "rooms"));
-      const rooms = roomsSnapshot.docs;
-
-      for (const room of rooms) {
-        const roomId = room.id;
-
-        // Delete callerCandidates
-        const callerSnap = await getDocs(collection(db, `rooms/${roomId}/callerCandidates`));
-        for (const c of callerSnap.docs) {
-          await deleteDoc(doc(db, `rooms/${roomId}/callerCandidates/${c.id}`));
-        }
-
-        // Delete calleeCandidates
-        const calleeSnap = await getDocs(collection(db, `rooms/${roomId}/calleeCandidates`));
-        for (const c of calleeSnap.docs) {
-          await deleteDoc(doc(db, `rooms/${roomId}/calleeCandidates/${c.id}`));
-        }
-
-        // Delete room doc
-        await deleteDoc(doc(db, "rooms", roomId));
+      const querySnapshot = await getDocs(collection(db, "rooms"));
+      let deletedCount = 0;
+      for (const docSnap of querySnapshot.docs) {
+        await deleteDoc(doc(db, "rooms", docSnap.id));
+        deletedCount++;
       }
-
-      alert("All rooms deleted.");
+      status.textContent = `Deleted ${deletedCount} room(s) successfully.`;
       loadRooms();
     }
 
-    deleteAllBtn.onclick = deleteAllRooms;
+    deleteButton.addEventListener('click', () => {
+      if (confirm("Are you sure you want to delete all rooms?")) {
+        deleteAllRooms();
+      }
+    });
 
     loadRooms();
   </script>
