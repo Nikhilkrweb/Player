@@ -3,58 +3,22 @@
 <head>
   <title>Video Call</title>
   <style>
-    body {
-      font-family: sans-serif;
-      margin: 0;
-      padding: 0;
-      text-align: center;
-    }
-    video {
-      width: 45%;
-      margin: 10px;
-      border: 2px solid #000;
-    }
-    #room-id-section {
-      margin: 20px;
-    }
-    #endCall {
-      background-color: red;
-      color: white;
-      padding: 10px 20px;
-      font-size: 16px;
-      border: none;
-      margin-top: 20px;
-      cursor: pointer;
-    }
+    body { font-family: Arial; text-align: center; background: #f4f4f4; margin: 0; }
+    video { width: 45%; margin: 10px; border-radius: 10px; }
+    #roomId { margin: 1rem; font-size: 18px; }
+    button { padding: 10px 20px; background: #d9534f; color: white; border: none; border-radius: 5px; cursor: pointer; }
   </style>
 </head>
 <body>
-  <h1>Video Chat Room</h1>
-  <div id="room-id-section">
-    <div id="roomIdDisplay" style="display: none;"></div>
-    <input id="roomIdInput" placeholder="Enter Room ID" style="font-size: 18px; padding: 5px;" />
-    <button onclick="joinRoom()">Join</button>
-  </div>
-
-  <div id="video-section" style="display:none;">
-    <video id="localVideo" autoplay playsinline muted></video>
-    <video id="remoteVideo" autoplay playsinline></video><br>
-    <button id="endCall" onclick="endCall()">End Call</button>
-  </div>
+  <h2>Video Call</h2>
+  <div id="roomId">Room ID: </div>
+  <video id="localVideo" autoplay muted></video>
+  <video id="remoteVideo" autoplay></video><br>
+  <button onclick="endCall()">End Call</button>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-    import {
-      getFirestore,
-      collection,
-      doc,
-      setDoc,
-      getDoc,
-      onSnapshot,
-      addDoc,
-      deleteDoc,
-      getDocs
-    } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+    import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
@@ -69,150 +33,139 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    });
+    const roomId = localStorage.getItem('roomId');
+    const isCaller = localStorage.getItem('isCaller') === 'true';
+    const roomDoc = doc(db, 'rooms', roomId);
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    document.getElementById('roomId').innerText = 'Room ID: ' + roomId;
 
-    let localStream;
-    let roomRef;
-    let roomId;
+    let pc, localStream, remoteStream;
+    let isReconnecting = false;
 
-    const localVideo = document.getElementById("localVideo");
-    const remoteVideo = document.getElementById("remoteVideo");
-    const roomIdInput = document.getElementById("roomIdInput");
-    const roomIdDisplay = document.getElementById("roomIdDisplay");
-    const roomSection = document.getElementById("room-id-section");
-    const videoSection = document.getElementById("video-section");
+    async function createPeerConnection() {
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
 
-    const role = localStorage.getItem("role");
-    roomId = localStorage.getItem("roomId");
+      // Remote stream
+      remoteStream = new MediaStream();
+      remoteVideo.srcObject = remoteStream;
 
-    async function startCamera() {
+      pc.ontrack = (event) => {
+        event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
+      };
+
+      // Reconnect logic
+      pc.oniceconnectionstatechange = async () => {
+        if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+          console.log('Disconnected. Reconnecting...');
+          isReconnecting = true;
+          await resetRoomAndRenegotiate();
+        }
+      };
+
+      // ICE Candidate
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          const target = isCaller ? 'callerCandidates' : 'calleeCandidates';
+          await addDoc(collection(roomDoc, target), event.candidate.toJSON());
+        }
+      };
+    }
+
+    async function startCall() {
+      await createPeerConnection();
+
+      // Get media
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
       localVideo.srcObject = localStream;
-    }
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
-    pc.ontrack = (event) => {
-      remoteVideo.srcObject = event.streams[0];
-    };
+      const callerCandidates = collection(roomDoc, 'callerCandidates');
+      const calleeCandidates = collection(roomDoc, 'calleeCandidates');
 
-    pc.onicecandidate = event => {
-      if (event.candidate && roomRef) {
-        const candidates = collection(roomRef, role === "creator" ? "callerCandidates" : "calleeCandidates");
-        addDoc(candidates, event.candidate.toJSON());
+      // If room doesn't exist and is caller: create it
+      const roomSnap = await getDoc(roomDoc);
+      if (!roomSnap.exists() && isCaller) {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await setDoc(roomDoc, { offer });
       }
-    };
 
-    window.joinRoom = async function () {
-      roomId = roomIdInput.value.trim();
-      if (!roomId) return alert("Enter valid Room ID");
-
-      localStorage.setItem("roomId", roomId);
-      localStorage.setItem("role", "joiner");
-
-      await connectAsJoiner(roomId);
-    };
-
-    async function connectAsJoiner(roomId) {
-      roomRef = doc(db, "rooms", roomId);
-      const roomSnap = await getDoc(roomRef);
-      if (!roomSnap.exists()) return alert("Room not found");
-
-      roomSection.style.display = "none";
-      videoSection.style.display = "block";
-      await startCamera();
-
-      const roomData = roomSnap.data();
-      await pc.setRemoteDescription(new RTCSessionDescription(roomData.offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await setDoc(roomRef, { answer }, { merge: true });
-
-      onSnapshot(collection(roomRef, "callerCandidates"), snapshot => {
-        snapshot.docChanges().forEach(change => {
-          if (change.type === "added") {
-            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-          }
-        });
-      });
-    }
-
-    async function createRoom() {
-      if (!roomId) {
-        roomId = Math.floor(1000 + Math.random() * 9000).toString();
-        localStorage.setItem("roomId", roomId);
-      }
-      localStorage.setItem("role", "creator");
-
-      roomRef = doc(db, "rooms", roomId);
-
-      roomSection.style.display = "block";
-      videoSection.style.display = "block";
-      await startCamera();
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      await setDoc(roomRef, { offer });
-
-      onSnapshot(roomRef, async snapshot => {
+      // Watch for offer/answer changes
+      onSnapshot(roomDoc, async snapshot => {
         const data = snapshot.data();
-        if (data?.answer) {
+        if (!data) return;
+
+        if (data.offer && !isCaller && !pc.currentRemoteDescription) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await updateDoc(roomDoc, { answer });
+        }
+
+        if (data.answer && isCaller && !pc.currentRemoteDescription) {
           await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
         }
       });
 
-      onSnapshot(collection(roomRef, "calleeCandidates"), snapshot => {
+      // Watch for ICE
+      onSnapshot(isCaller ? calleeCandidates : callerCandidates, snapshot => {
         snapshot.docChanges().forEach(change => {
-          if (change.type === "added") {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            pc.addIceCandidate(new RTCIceCandidate(data));
+          }
+        });
+      });
+    }
+
+    async function resetRoomAndRenegotiate() {
+      // Reset old room
+      try {
+        await deleteDoc(roomDoc);
+      } catch {}
+
+      // Create new peer connection and room
+      await createPeerConnection();
+
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await setDoc(roomDoc, { offer });
+
+      // Re-init ICE listeners
+      const callerCandidates = collection(roomDoc, 'callerCandidates');
+      const calleeCandidates = collection(roomDoc, 'calleeCandidates');
+
+      onSnapshot(isCaller ? calleeCandidates : callerCandidates, snapshot => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === 'added') {
             pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
           }
         });
       });
 
-      roomIdDisplay.style.display = "block";
-      roomIdDisplay.innerHTML = `<strong>Room ID: ${roomId}</strong>`;
-      roomIdInput.style.display = "none";
-      document.querySelector("button[onclick='joinRoom()']").style.display = "none";
+      onSnapshot(roomDoc, async snapshot => {
+        const data = snapshot.data();
+        if (!pc.currentRemoteDescription && data?.answer && isCaller) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        } else if (!pc.currentRemoteDescription && data?.offer && !isCaller) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await updateDoc(roomDoc, { answer });
+        }
+      });
     }
 
-    window.endCall = async function () {
-      try {
-        pc.close();
-        localStream.getTracks().forEach(track => track.stop());
-
-        if (roomRef) {
-          const callerCandidates = await getDocs(collection(roomRef, "callerCandidates"));
-          callerCandidates.forEach(async doc => await deleteDoc(doc.ref));
-
-          const calleeCandidates = await getDocs(collection(roomRef, "calleeCandidates"));
-          calleeCandidates.forEach(async doc => await deleteDoc(doc.ref));
-
-          await deleteDoc(roomRef);
-        }
-
-        localStorage.removeItem("roomId");
-        localStorage.removeItem("role");
-        location.href = "index.html";
-      } catch (e) {
-        console.error("Error closing room:", e);
-      }
+    window.endCall = async () => {
+      await deleteDoc(roomDoc);
+      localStorage.clear();
+      location.href = 'index.html';
     };
 
-    // Auto reconnect logic on refresh
-    if (roomId && role === "creator") {
-      createRoom();
-    } else if (roomId && role === "joiner") {
-      connectAsJoiner(roomId);
-    } else {
-      // if opened with ?action=create
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get("action") === "create") {
-        localStorage.setItem("role", "creator");
-        createRoom();
-      }
-    }
-
+    startCall();
   </script>
 </body>
 </html>
