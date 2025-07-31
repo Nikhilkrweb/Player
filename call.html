@@ -19,7 +19,7 @@
     }
 
     video {
-      width: 100%;
+      width: 90%;
       max-width: 500px;
       margin: 10px 0;
       border-radius: 10px;
@@ -44,10 +44,9 @@
   <video id="remoteVideo" autoplay playsinline></video>
   <button id="endCall">End Call</button>
 
-  <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, getDoc, onSnapshot, deleteDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, getDoc, deleteDoc, onSnapshot, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
@@ -55,33 +54,28 @@
       projectId: "video-chat-44584",
       storageBucket: "video-chat-44584.appspot.com",
       messagingSenderId: "598757234224",
-      appId: "1:598757234224:web:1ae7b1d35abafeb7d7bff5",
-      measurementId: "G-C18BHR5LH1"
+      appId: "1:598757234224:web:1ae7b1d35abafeb7d7bff5"
     };
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    const roomId = localStorage.getItem('roomId');
-    const isCaller = localStorage.getItem('isCaller') === 'true';
-
-    document.getElementById('roomIdDisplay').textContent = 'Room ID: ' + roomId;
-
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
     const endCallBtn = document.getElementById('endCall');
+    const roomId = localStorage.getItem('roomId');
+    const isCaller = localStorage.getItem('isCaller') === 'true';
+
+    document.getElementById("roomIdDisplay").innerText = "Room ID: " + roomId;
 
     const servers = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' }
-      ]
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     };
 
     const pc = new RTCPeerConnection(servers);
     let localStream;
 
-    // Setup Media
-    async function setupMedia() {
+    async function startMedia() {
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
       localVideo.srcObject = localStream;
@@ -92,48 +86,45 @@
 
       pc.onicecandidate = async event => {
         if (event.candidate) {
-          const candidatesCollection = doc(db, 'rooms', roomId, isCaller ? 'callerCandidates' : 'calleeCandidates');
-          await setDoc(doc(candidatesCollection, event.candidate.sdpMid), event.candidate.toJSON());
+          const candidateCol = collection(db, 'rooms', roomId, isCaller ? 'callerCandidates' : 'calleeCandidates');
+          await addDoc(candidateCol, event.candidate.toJSON());
         }
       };
     }
 
-    // Create or Join Room
-    async function initCall() {
+    async function connect() {
       const roomRef = doc(db, 'rooms', roomId);
-      const roomSnapshot = await getDoc(roomRef);
+      const roomSnap = await getDoc(roomRef);
 
       if (isCaller) {
-        if (!roomSnapshot.exists()) {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await setDoc(roomRef, { offer });
 
-          await setDoc(roomRef, { offer });
+        onSnapshot(roomRef, async (snap) => {
+          const data = snap.data();
+          if (data?.answer && !pc.currentRemoteDescription) {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          }
+        });
 
-          onSnapshot(roomRef, async (snapshot) => {
-            const data = snapshot.data();
-            if (data?.answer && !pc.currentRemoteDescription) {
-              await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        onSnapshot(collection(db, 'rooms', roomId, 'calleeCandidates'), (snapshot) => {
+          snapshot.docChanges().forEach(change => {
+            if (change.type === 'added') {
+              pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
             }
           });
+        });
 
-          onSnapshot(doc(db, 'rooms', roomId, 'calleeCandidates'), (snapshot) => {
-            snapshot.docChanges().forEach(change => {
-              if (change.type === 'added') {
-                pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-              }
-            });
-          });
-        }
       } else {
-        if (roomSnapshot.exists()) {
-          const data = roomSnapshot.data();
+        if (roomSnap.exists()) {
+          const data = roomSnap.data();
           await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           await setDoc(roomRef, { ...data, answer });
 
-          onSnapshot(doc(db, 'rooms', roomId, 'callerCandidates'), (snapshot) => {
+          onSnapshot(collection(db, 'rooms', roomId, 'callerCandidates'), (snapshot) => {
             snapshot.docChanges().forEach(change => {
               if (change.type === 'added') {
                 pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
@@ -141,22 +132,19 @@
             });
           });
         } else {
-          alert('Room not found!');
+          alert("Room does not exist!");
         }
       }
     }
 
-    // End Call
     endCallBtn.onclick = async () => {
-      const roomRef = doc(db, 'rooms', roomId);
-      await deleteDoc(roomRef);
-      localStorage.removeItem('roomId');
-      localStorage.removeItem('isCaller');
-      window.location.href = 'index.html';
+      await deleteDoc(doc(db, "rooms", roomId));
+      localStorage.removeItem("roomId");
+      localStorage.removeItem("isCaller");
+      window.location.href = "index.html";
     };
 
-    // Boot up everything
-    setupMedia().then(initCall);
+    startMedia().then(connect);
   </script>
 </body>
 </html>
