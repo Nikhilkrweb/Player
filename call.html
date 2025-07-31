@@ -24,9 +24,10 @@
       left: 50%;
       top: 50%;
       transform: translate(-50%, -50%);
-      max-height: 100%;
-      max-width: 100%;
-      aspect-ratio: 16 / 9;
+      width: 100vw;
+      height: 100vh;
+      max-width: 100vw;
+      max-height: 100vh;
       object-fit: contain;
       z-index: 1;
       background: black;
@@ -43,7 +44,6 @@
       border: 2px solid #fff;
       z-index: 3;
       background-color: black;
-      aspect-ratio: 16 / 9;
     }
     #endCall {
       position: absolute;
@@ -194,10 +194,6 @@
     let availableVideoDevices = [];
     let currentQuality = 'default';
 
-    function setVideoAspect(videoEl, stream) {
-      // Always use landscape (16:9) CSS, no .portrait class needed
-    }
-
     function getConstraints(quality, deviceId) {
       let constraints = {};
       if (quality === 'hd') {
@@ -246,7 +242,6 @@
         pc.addTrack(videoTrack, localStream);
       }
       localVideo.srcObject = localStream;
-      setVideoAspect(localVideo, localStream);
     }
 
     async function getVideoDevices() {
@@ -263,7 +258,6 @@
 
       pc.ontrack = event => {
         remoteVideo.srcObject = event.streams[0];
-        setVideoAspect(remoteVideo, event.streams[0]);
       };
 
       pc.onicecandidate = async event => {
