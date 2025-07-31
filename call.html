@@ -1,104 +1,45 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>WhatsApp Style Video Call</title>
+  <title>Video Call</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
     body {
       font-family: sans-serif;
-      background-color: #000;
-      overflow: hidden;
-    }
-    #video-section {
-      position: relative;
-      width: 100vw;
-      height: 100vh;
-    }
-    video {
-      position: absolute;
-      object-fit: cover;
-      background-color: #000;
-    }
-    #remoteVideo {
-      width: 100%;
-      height: 100%;
-      z-index: 1;
-    }
-    #localVideo {
-      width: 30vw;
-      height: 30vh;
-      bottom: 20px;
-      right: 20px;
-      border-radius: 12px;
-      border: 2px solid white;
-      z-index: 2;
-    }
-    #localVideo,
-    #remoteVideo {
-      border-radius: 0;
-    }
-    #localVideo {
-      position: absolute;
-    }
-    #room-id-section {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      z-index: 3;
-      background-color: white;
-      padding: 20px;
-      border-radius: 12px;
+      margin: 0;
+      padding: 0;
       text-align: center;
     }
-    #roomIdInput {
-      font-size: 18px;
-      padding: 10px;
-      width: 200px;
+    video {
+      width: 45%;
+      margin: 10px;
+      border: 2px solid #000;
     }
-    #room-id-section button {
-      padding: 10px 20px;
-      font-size: 16px;
-      margin-top: 10px;
-      cursor: pointer;
-    }
-    #roomIdDisplay {
-      font-size: 18px;
-      margin-bottom: 10px;
+    #room-id-section {
+      margin: 20px;
     }
     #endCall {
-      position: absolute;
-      bottom: 30px;
-      left: 50%;
-      transform: translateX(-50%);
       background-color: red;
       color: white;
-      width: 60px;
-      height: 60px;
-      border-radius: 50%;
+      padding: 10px 20px;
+      font-size: 16px;
       border: none;
-      font-size: 20px;
-      z-index: 3;
+      margin-top: 20px;
       cursor: pointer;
     }
   </style>
 </head>
 <body>
-
+  <h1>Video Chat Room</h1>
   <div id="room-id-section">
     <div id="roomIdDisplay" style="display: none;"></div>
-    <input id="roomIdInput" placeholder="Enter Room ID" />
+    <input id="roomIdInput" placeholder="Enter Room ID" style="font-size: 18px; padding: 5px;" />
     <button onclick="joinRoom()">Join</button>
   </div>
 
   <div id="video-section" style="display:none;">
-    <video id="remoteVideo" autoplay playsinline></video>
     <video id="localVideo" autoplay playsinline muted></video>
-    <button id="endCall" onclick="endCall()">✕</button>
+    <video id="remoteVideo" autoplay playsinline></video><br>
+    <button id="endCall" onclick="endCall()">End Call</button>
   </div>
 
   <script type="module">
@@ -206,7 +147,7 @@
 
       roomRef = doc(db, "rooms", roomId);
 
-      roomSection.style.display = "none";
+      roomSection.style.display = "block";
       videoSection.style.display = "block";
       await startCamera();
 
@@ -264,6 +205,7 @@
     } else if (roomId && role === "joiner") {
       connectAsJoiner(roomId);
     } else {
+      // if opened with ?action=create
       const urlParams = new URLSearchParams(window.location.search);
       if (urlParams.get("action") === "create") {
         localStorage.setItem("role", "creator");
