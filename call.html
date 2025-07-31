@@ -40,7 +40,15 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
   import { getFirestore, doc, getDoc, setDoc, onSnapshot, addDoc, collection, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-  const firebaseConfig = { /* your config */ };
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_AUTH_DOMAIN",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_BUCKET",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
 
@@ -51,64 +59,84 @@
   const pc = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}] });
   const localVideo = document.getElementById("localVideo");
   const remoteVideo = document.getElementById("remoteVideo");
-  let localStream, remoteStream = new MediaStream();
-
-  remoteVideo.srcObject = remoteStream;
+  let localStream = null;
+  let isCreator = false;
 
   async function startMedia() {
-    localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
     localVideo.srcObject = localStream;
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
   }
 
-  pc.ontrack = e => e.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
+  pc.ontrack = event => {
+    // Attach the remote stream directly
+    const [remoteStream] = event.streams;
+    remoteVideo.srcObject = remoteStream;
+  };
 
-  pc.onicecandidate = async e => {
-    if (e.candidate) {
-      await addDoc(collection(db, `rooms/${roomId}/${isCreator?'callerCandidates':'calleeCandidates'}`), e.candidate.toJSON());
+  pc.onicecandidate = async event => {
+    if (event.candidate) {
+      const candidate = event.candidate.toJSON();
+      await addDoc(collection(db, `rooms/${roomId}/${isCreator ? 'callerCandidates' : 'calleeCandidates'}`), candidate);
     }
   };
 
   const roomRef = doc(db, "rooms", roomId);
-  let isCreator = false;
 
   async function connect() {
     await startMedia();
-    const snap = await getDoc(roomRef);
-    if (snap.exists()) {
-      const data = snap.data();
-      await pc.setRemoteDescription(data.offer);
+
+    const roomSnapshot = await getDoc(roomRef);
+
+    if (roomSnapshot.exists()) {
+      // Joiner
+      const data = roomSnapshot.data();
+      await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      await setDoc(roomRef, { answer }, { merge:true });
+      await setDoc(roomRef, { answer }, { merge: true });
 
-      onSnapshot(collection(db, `rooms/${roomId}/callerCandidates`), s => {
-        s.docChanges().forEach(c => pc.addIceCandidate(c.doc.data()));
+      onSnapshot(collection(db, `rooms/${roomId}/callerCandidates`), snapshot => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === "added") {
+            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+          }
+        });
       });
+
     } else {
+      // Creator
       isCreator = true;
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await setDoc(roomRef, { offer });
 
-      onSnapshot(roomRef, async s => {
-        const d = s.data();
-        if (d.answer && !pc.currentRemoteDescription) 
-          await pc.setRemoteDescription(d.answer);
+      onSnapshot(roomRef, async snapshot => {
+        const data = snapshot.data();
+        if (data?.answer && !pc.currentRemoteDescription) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        }
       });
 
-      onSnapshot(collection(db, `rooms/${roomId}/calleeCandidates`), s => {
-        s.docChanges().forEach(c => pc.addIceCandidate(c.doc.data()));
+      onSnapshot(collection(db, `rooms/${roomId}/calleeCandidates`), snapshot => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === "added") {
+            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+          }
+        });
       });
     }
   }
 
   document.getElementById("endCall").onclick = async () => {
-    localStream.getTracks().forEach(t => t.stop());
+    if (localStream) {
+      localStream.getTracks().forEach(t => t.stop());
+    }
     pc.close();
-    const col = collection(db, `rooms/${roomId}`);
-    const docs = await getDocs(col);
-    await Promise.all(docs.docs.map(d => deleteDoc(d.ref)));
+
+    const callerCandidates = await getDocs(collection(db, `rooms/${roomId}/callerCandidates`));
+    const calleeCandidates = await getDocs(collection(db, `rooms/${roomId}/calleeCandidates`));
+    await Promise.all([...callerCandidates.docs, ...calleeCandidates.docs].map(d => deleteDoc(d.ref)));
     await deleteDoc(roomRef);
     localStorage.removeItem("roomId");
     location.href = "index.html";
