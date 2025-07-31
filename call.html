@@ -44,7 +44,17 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-    import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+    import {
+      getFirestore,
+      collection,
+      doc,
+      setDoc,
+      getDoc,
+      onSnapshot,
+      addDoc,
+      deleteDoc,
+      getDocs
+    } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
@@ -63,9 +73,6 @@
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const action = urlParams.get('action');
-
     let localStream;
     let roomRef;
     let roomId;
@@ -76,6 +83,9 @@
     const roomIdDisplay = document.getElementById("roomIdDisplay");
     const roomSection = document.getElementById("room-id-section");
     const videoSection = document.getElementById("video-section");
+
+    const role = localStorage.getItem("role");
+    roomId = localStorage.getItem("roomId");
 
     async function startCamera() {
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -89,7 +99,7 @@
 
     pc.onicecandidate = event => {
       if (event.candidate && roomRef) {
-        const candidates = collection(roomRef, action === "create" ? "callerCandidates" : "calleeCandidates");
+        const candidates = collection(roomRef, role === "creator" ? "callerCandidates" : "calleeCandidates");
         addDoc(candidates, event.candidate.toJSON());
       }
     };
@@ -99,7 +109,12 @@
       if (!roomId) return alert("Enter valid Room ID");
 
       localStorage.setItem("roomId", roomId);
+      localStorage.setItem("role", "joiner");
 
+      await connectAsJoiner(roomId);
+    };
+
+    async function connectAsJoiner(roomId) {
       roomRef = doc(db, "rooms", roomId);
       const roomSnap = await getDoc(roomRef);
       if (!roomSnap.exists()) return alert("Room not found");
@@ -112,7 +127,6 @@
       await pc.setRemoteDescription(new RTCSessionDescription(roomData.offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-
       await setDoc(roomRef, { answer }, { merge: true });
 
       onSnapshot(collection(roomRef, "callerCandidates"), snapshot => {
@@ -122,49 +136,44 @@
           }
         });
       });
-    };
+    }
 
     async function createRoom() {
-      await startCamera();
-
-      roomId = localStorage.getItem("roomId");
-
       if (!roomId) {
         roomId = Math.floor(1000 + Math.random() * 9000).toString();
         localStorage.setItem("roomId", roomId);
       }
+      localStorage.setItem("role", "creator");
 
       roomRef = doc(db, "rooms", roomId);
-      const roomSnap = await getDoc(roomRef);
-      if (roomSnap.exists()) {
-        console.log("Room already exists. Reusing.");
-      } else {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        await setDoc(roomRef, { offer });
 
-        onSnapshot(roomRef, async snapshot => {
-          const data = snapshot.data();
-          if (data?.answer) {
-            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+      roomSection.style.display = "block";
+      videoSection.style.display = "block";
+      await startCamera();
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await setDoc(roomRef, { offer });
+
+      onSnapshot(roomRef, async snapshot => {
+        const data = snapshot.data();
+        if (data?.answer) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        }
+      });
+
+      onSnapshot(collection(roomRef, "calleeCandidates"), snapshot => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === "added") {
+            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
           }
         });
-
-        onSnapshot(collection(roomRef, "calleeCandidates"), snapshot => {
-          snapshot.docChanges().forEach(change => {
-            if (change.type === "added") {
-              pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-            }
-          });
-        });
-      }
+      });
 
       roomIdDisplay.style.display = "block";
       roomIdDisplay.innerHTML = `<strong>Room ID: ${roomId}</strong>`;
       roomIdInput.style.display = "none";
       document.querySelector("button[onclick='joinRoom()']").style.display = "none";
-      roomSection.style.display = "block";
-      videoSection.style.display = "block";
     }
 
     window.endCall = async function () {
@@ -183,15 +192,27 @@
         }
 
         localStorage.removeItem("roomId");
+        localStorage.removeItem("role");
         location.href = "index.html";
       } catch (e) {
         console.error("Error closing room:", e);
       }
     };
 
-    if (action === "create") {
+    // Auto reconnect logic on refresh
+    if (roomId && role === "creator") {
       createRoom();
+    } else if (roomId && role === "joiner") {
+      connectAsJoiner(roomId);
+    } else {
+      // if opened with ?action=create
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get("action") === "create") {
+        localStorage.setItem("role", "creator");
+        createRoom();
+      }
     }
+
   </script>
 </body>
 </html>
