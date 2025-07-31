@@ -4,57 +4,40 @@
   <title>Video Call</title>
   <style>
     body {
-      font-family: sans-serif;
       margin: 0;
-      padding: 0;
-      text-align: center;
+      background-color: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
     }
     video {
-      width: 45%;
+      width: 90%;
+      max-width: 600px;
       margin: 10px;
-      border: 2px solid #000;
-    }
-    #room-id-section {
-      margin: 20px;
+      background: #333;
     }
     #endCall {
-      background-color: red;
-      color: white;
       padding: 10px 20px;
       font-size: 16px;
+      background: red;
+      color: white;
       border: none;
+      border-radius: 5px;
       margin-top: 20px;
       cursor: pointer;
     }
   </style>
 </head>
 <body>
-  <h1>Video Chat Room</h1>
-  <div id="room-id-section">
-    <div id="roomIdDisplay" style="display: none;"></div>
-    <input id="roomIdInput" placeholder="Enter Room ID" style="font-size: 18px; padding: 5px;" />
-    <button onclick="joinRoom()">Join</button>
-  </div>
-
-  <div id="video-section" style="display:none;">
-    <video id="localVideo" autoplay playsinline muted></video>
-    <video id="remoteVideo" autoplay playsinline></video><br>
-    <button id="endCall" onclick="endCall()">End Call</button>
-  </div>
+  <video id="localVideo" autoplay muted playsinline></video>
+  <video id="remoteVideo" autoplay playsinline></video>
+  <button id="endCall">End Call</button>
 
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-    import {
-      getFirestore,
-      collection,
-      doc,
-      setDoc,
-      getDoc,
-      onSnapshot,
-      addDoc,
-      deleteDoc,
-      getDocs
-    } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
+    import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
 
     const firebaseConfig = {
       apiKey: "AIzaSyCRqfvB5bi8jmxNfu5zhVMcwWR0-YIM8ks",
@@ -69,150 +52,121 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    const roomId = localStorage.getItem('roomId');
+    const isCaller = localStorage.getItem('isCaller') === 'true';
+    const roomRef = doc(db, 'rooms', roomId);
+
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const endCallBtn = document.getElementById('endCall');
+
+    let pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+      ]
     });
 
     let localStream;
-    let roomRef;
-    let roomId;
+    let remoteStream = new MediaStream();
 
-    const localVideo = document.getElementById("localVideo");
-    const remoteVideo = document.getElementById("remoteVideo");
-    const roomIdInput = document.getElementById("roomIdInput");
-    const roomIdDisplay = document.getElementById("roomIdDisplay");
-    const roomSection = document.getElementById("room-id-section");
-    const videoSection = document.getElementById("video-section");
+    remoteVideo.srcObject = remoteStream;
 
-    const role = localStorage.getItem("role");
-    roomId = localStorage.getItem("roomId");
+    pc.ontrack = (event) => {
+      event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
+    };
 
-    async function startCamera() {
+    pc.onicecandidate = async (event) => {
+      if (event.candidate) {
+        const field = isCaller ? 'callerCandidates' : 'calleeCandidates';
+        const candidatesRef = doc(db, `rooms/${roomId}/${field}/${event.candidate.sdpMid}`);
+        await setDoc(candidatesRef, event.candidate.toJSON());
+      }
+    };
+
+    // Add local stream
+    async function start() {
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
       localVideo.srcObject = localStream;
-    }
 
-    pc.ontrack = (event) => {
-      remoteVideo.srcObject = event.streams[0];
-    };
+      const roomSnapshot = await getDoc(roomRef);
 
-    pc.onicecandidate = event => {
-      if (event.candidate && roomRef) {
-        const candidates = collection(roomRef, role === "creator" ? "callerCandidates" : "calleeCandidates");
-        addDoc(candidates, event.candidate.toJSON());
-      }
-    };
+      if (roomSnapshot.exists()) {
+        // Room exists
+        if (!isCaller) {
+          const roomData = roomSnapshot.data();
+          await pc.setRemoteDescription(new RTCSessionDescription(roomData.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await updateDoc(roomRef, { answer });
 
-    window.joinRoom = async function () {
-      roomId = roomIdInput.value.trim();
-      if (!roomId) return alert("Enter valid Room ID");
+          // Listen for ICE candidates
+          onSnapshot(doc(db, `rooms/${roomId}/callerCandidates/candidate`), (docSnap) => {
+            if (docSnap.exists()) {
+              const data = docSnap.data();
+              if (data) pc.addIceCandidate(new RTCIceCandidate(data));
+            }
+          });
+        } else {
+          // Listen for answer
+          onSnapshot(roomRef, async (snapshot) => {
+            const data = snapshot.data();
+            if (data?.answer && !pc.currentRemoteDescription) {
+              await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            }
+          });
 
-      localStorage.setItem("roomId", roomId);
-      localStorage.setItem("role", "joiner");
+          // Listen for ICE candidates
+          onSnapshot(doc(db, `rooms/${roomId}/calleeCandidates/candidate`), (docSnap) => {
+            if (docSnap.exists()) {
+              const data = docSnap.data();
+              if (data) pc.addIceCandidate(new RTCIceCandidate(data));
+            }
+          });
+        }
+      } else if (isCaller) {
+        // Room doesn't exist, creator creates offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
 
-      await connectAsJoiner(roomId);
-    };
+        const roomWithOffer = { offer: { type: offer.type, sdp: offer.sdp } };
+        await setDoc(roomRef, roomWithOffer);
 
-    async function connectAsJoiner(roomId) {
-      roomRef = doc(db, "rooms", roomId);
-      const roomSnap = await getDoc(roomRef);
-      if (!roomSnap.exists()) return alert("Room not found");
-
-      roomSection.style.display = "none";
-      videoSection.style.display = "block";
-      await startCamera();
-
-      const roomData = roomSnap.data();
-      await pc.setRemoteDescription(new RTCSessionDescription(roomData.offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await setDoc(roomRef, { answer }, { merge: true });
-
-      onSnapshot(collection(roomRef, "callerCandidates"), snapshot => {
-        snapshot.docChanges().forEach(change => {
-          if (change.type === "added") {
-            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+        // Listen for answer
+        onSnapshot(roomRef, async (snapshot) => {
+          const data = snapshot.data();
+          if (data?.answer && !pc.currentRemoteDescription) {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
           }
         });
-      });
-    }
 
-    async function createRoom() {
-      if (!roomId) {
-        roomId = Math.floor(1000 + Math.random() * 9000).toString();
-        localStorage.setItem("roomId", roomId);
-      }
-      localStorage.setItem("role", "creator");
-
-      roomRef = doc(db, "rooms", roomId);
-
-      roomSection.style.display = "block";
-      videoSection.style.display = "block";
-      await startCamera();
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      await setDoc(roomRef, { offer });
-
-      onSnapshot(roomRef, async snapshot => {
-        const data = snapshot.data();
-        if (data?.answer) {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-        }
-      });
-
-      onSnapshot(collection(roomRef, "calleeCandidates"), snapshot => {
-        snapshot.docChanges().forEach(change => {
-          if (change.type === "added") {
-            pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+        // Listen for ICE candidates
+        onSnapshot(doc(db, `rooms/${roomId}/calleeCandidates/candidate`), (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data) pc.addIceCandidate(new RTCIceCandidate(data));
           }
         });
-      });
-
-      roomIdDisplay.style.display = "block";
-      roomIdDisplay.innerHTML = `<strong>Room ID: ${roomId}</strong>`;
-      roomIdInput.style.display = "none";
-      document.querySelector("button[onclick='joinRoom()']").style.display = "none";
+      }
     }
 
-    window.endCall = async function () {
-      try {
-        pc.close();
-        localStream.getTracks().forEach(track => track.stop());
+    start();
 
-        if (roomRef) {
-          const callerCandidates = await getDocs(collection(roomRef, "callerCandidates"));
-          callerCandidates.forEach(async doc => await deleteDoc(doc.ref));
+    endCallBtn.onclick = async () => {
+      localStorage.removeItem('roomId');
+      localStorage.removeItem('isCaller');
 
-          const calleeCandidates = await getDocs(collection(roomRef, "calleeCandidates"));
-          calleeCandidates.forEach(async doc => await deleteDoc(doc.ref));
+      // Close Firebase room
+      await deleteDoc(roomRef);
 
-          await deleteDoc(roomRef);
-        }
+      // Close peer connection
+      pc.close();
 
-        localStorage.removeItem("roomId");
-        localStorage.removeItem("role");
-        location.href = "index.html";
-      } catch (e) {
-        console.error("Error closing room:", e);
-      }
+      // Stop local stream
+      localStream.getTracks().forEach(track => track.stop());
+
+      window.location.href = 'index.html';
     };
-
-    // Auto reconnect logic on refresh
-    if (roomId && role === "creator") {
-      createRoom();
-    } else if (roomId && role === "joiner") {
-      connectAsJoiner(roomId);
-    } else {
-      // if opened with ?action=create
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get("action") === "create") {
-        localStorage.setItem("role", "creator");
-        createRoom();
-      }
-    }
-
   </script>
 </body>
 </html>
