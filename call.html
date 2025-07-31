@@ -11,9 +11,13 @@
 
     html, body {
       height: 100%;
+      width: 100%;
       background-color: #000;
       font-family: Arial, sans-serif;
       overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
 
     #roomIdDisplay {
@@ -29,51 +33,59 @@
       z-index: 2;
     }
 
-    video {
-      position: absolute;
+    .video-container {
+      position: relative;
+      width: 100%;
+      max-width: 360px;
+      aspect-ratio: 9 / 16;
+      background-color: #000;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    #remoteVideo {
       width: 100%;
       height: 100%;
       object-fit: cover;
-      z-index: 0;
     }
 
     #localVideo {
       position: absolute;
-      width: 120px;
-      height: 160px;
-      bottom: 100px;
-      right: 20px;
-      border-radius: 12px;
+      bottom: 16px;
+      right: 16px;
+      width: 100px;
+      height: 140px;
+      border-radius: 10px;
       object-fit: cover;
       border: 2px solid #fff;
-      z-index: 1;
+      z-index: 2;
     }
 
     #endCall {
       position: absolute;
-      bottom: 30px;
+      bottom: 20px;
       left: 50%;
       transform: translateX(-50%);
       background-color: red;
       color: white;
       border: none;
       border-radius: 50%;
-      width: 64px;
-      height: 64px;
+      width: 60px;
+      height: 60px;
       font-size: 24px;
-      font-weight: bold;
       cursor: pointer;
-      z-index: 2;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      z-index: 3;
     }
   </style>
 </head>
 <body>
   <div id="roomIdDisplay">Room ID: ...</div>
-  <video id="remoteVideo" autoplay playsinline></video>
-  <video id="localVideo" autoplay muted playsinline></video>
+
+  <div class="video-container">
+    <video id="remoteVideo" autoplay playsinline></video>
+    <video id="localVideo" autoplay muted playsinline></video>
+  </div>
+
   <button id="endCall">✕</button>
 
   <script type="module">
