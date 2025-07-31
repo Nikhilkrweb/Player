@@ -216,6 +216,8 @@
       };
     }
 
+    // --- AUDIO/VIDEO TRACK MANAGEMENT FIX ---
+
     async function restartLocalStream(quality = currentQuality, deviceId = currentVideoDeviceId) {
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
@@ -235,16 +237,29 @@
           throw err;
         }
       }
+
       // Replace video track in peer connection
       const videoTrack = localStream.getVideoTracks()[0];
-      const senders = pc.getSenders().filter(sender => sender.track && sender.track.kind === "video");
-      if (senders.length && videoTrack) {
-        await senders[0].replaceTrack(videoTrack);
+      const videoSenders = pc.getSenders().filter(sender => sender.track && sender.track.kind === "video");
+      if (videoSenders.length && videoTrack) {
+        await videoSenders[0].replaceTrack(videoTrack);
       } else if (videoTrack) {
         pc.addTrack(videoTrack, localStream);
       }
+
+      // Replace audio track in peer connection
+      const audioTrack = localStream.getAudioTracks()[0];
+      const audioSenders = pc.getSenders().filter(sender => sender.track && sender.track.kind === "audio");
+      if (audioSenders.length && audioTrack) {
+        await audioSenders[0].replaceTrack(audioTrack);
+      } else if (audioTrack) {
+        pc.addTrack(audioTrack, localStream);
+      }
+
       localVideo.srcObject = localStream;
     }
+
+    // --- END AUDIO/VIDEO TRACK MANAGEMENT FIX ---
 
     async function getVideoDevices() {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -259,6 +274,7 @@
       await restartLocalStream(currentQuality, currentVideoDeviceId);
 
       pc.ontrack = event => {
+        // This stream contains both audio and video tracks from remote peer
         remoteVideo.srcObject = event.streams[0];
       };
 
