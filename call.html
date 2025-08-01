@@ -80,6 +80,23 @@
       align-items: center;
       justify-content: center;
     }
+    #screenShare {
+      position: absolute;
+      bottom: 10%;
+      right: 52%;
+      z-index: 4;
+      width: 50px;
+      height: 50px;
+      background: rgba(255,255,255,0.15);
+      border: none;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 22px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
     #videoQuality {
       position: absolute;
       bottom: 10%;
@@ -124,6 +141,13 @@
         right: 30%;
         font-size: 18px;
       }
+      #screenShare {
+        width: 40px;
+        height: 40px;
+        bottom: 10%;
+        right: 42%;
+        font-size: 18px;
+      }
       #videoQuality {
         font-size: 14px;
         padding: 4px 8px;
@@ -145,6 +169,7 @@
     <button id="endCall">
       <img src="end-call-icon.webp" alt="End Call">
     </button>
+    <button id="screenShare" title="Share Screen">&#128421;</button>
     <button id="switchCamera" title="Switch Camera">&#8645;</button>
     <select id="videoQuality" title="Video Quality">
       <option value="low" selected>Low (426x240)</option>
@@ -177,6 +202,7 @@
     const endCallBtn = document.getElementById('endCall');
     const roomIdDisplay = document.getElementById('roomIdDisplay');
     const switchCameraBtn = document.getElementById('switchCamera');
+    const screenShareBtn = document.getElementById('screenShare');
     const videoQualitySelect = document.getElementById('videoQuality');
 
     const roomId = localStorage.getItem('roomId');
@@ -194,6 +220,8 @@
     let availableVideoDevices = [];
     // Start with low (426x240) as default
     let currentQuality = 'low';
+    let screenSharing = false;
+    let originalVideoTrack = null;
 
     function getConstraints(quality, deviceId) {
       let constraints = {};
@@ -215,8 +243,6 @@
         audio: true
       };
     }
-
-    // --- AUDIO/VIDEO TRACK MANAGEMENT FIX ---
 
     async function restartLocalStream(quality = currentQuality, deviceId = currentVideoDeviceId) {
       if (localStream) {
@@ -259,8 +285,6 @@
       localVideo.srcObject = localStream;
     }
 
-    // --- END AUDIO/VIDEO TRACK MANAGEMENT FIX ---
-
     async function getVideoDevices() {
       const devices = await navigator.mediaDevices.enumerateDevices();
       return devices.filter(device => device.kind === 'videoinput');
@@ -274,7 +298,6 @@
       await restartLocalStream(currentQuality, currentVideoDeviceId);
 
       pc.ontrack = event => {
-        // This stream contains both audio and video tracks from remote peer
         remoteVideo.srcObject = event.streams[0];
       };
 
@@ -352,10 +375,39 @@
       await restartLocalStream(currentQuality, currentVideoDeviceId);
     };
 
+    screenShareBtn.onclick = async () => {
+      if (!screenSharing) {
+        try {
+          const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+          originalVideoTrack = localStream.getVideoTracks()[0];
+
+          const screenVideoTrack = screenStream.getVideoTracks()[0];
+          const videoSenders = pc.getSenders().filter(sender => sender.track && sender.track.kind === "video");
+          if (videoSenders.length) {
+            await videoSenders[0].replaceTrack(screenVideoTrack);
+          }
+          // Set local video to show screen share
+          localVideo.srcObject = screenStream;
+          screenSharing = true;
+
+          // If user stops sharing via browser UI, revert to camera
+          screenVideoTrack.onended = async () => {
+            screenSharing = false;
+            await restartLocalStream(currentQuality, currentVideoDeviceId);
+          };
+        } catch (err) {
+          alert("Screen sharing was cancelled or failed.");
+        }
+      } else {
+        screenSharing = false;
+        await restartLocalStream(currentQuality, currentVideoDeviceId);
+      }
+    };
+
     // Set select to Low by default on reload (for safety)
     videoQualitySelect.value = 'low';
 
     startMedia().then(connect);
   </script>
 </body>
-</html>
+  </html>
